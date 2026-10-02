@@ -1,0 +1,152 @@
+.map-heading {
+  flex: 0 0 auto;
+  text-align: center;
+  padding: 12px 66px 4px;
+}
+.map-heading h1 {
+  margin: 0 0 6px;
+  font-size: clamp(8px, 2vw, 12px);
+  line-height: 1.4;
+}
+.guide-launcher {
+  font-size: 7px;
+  padding: 4px 8px;
+}
+.deck-launcher {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-content: center;
+  gap: 2px;
+  font-size: 6px;
+  line-height: 1.2;
+  padding: 2px;
+}
+.pixel-card-icon {
+  width: 14px;
+  height: 18px;
+  margin: auto;
+  border: 2px solid #f4ecd8;
+  box-shadow: -3px 2px #64798d;
+  background: #335674;
+}
+.pixel-card-icon::after {
+  content: '';
+  display: block;
+  width: 4px;
+  height: 4px;
+  margin: 4px auto;
+  background: #fbc02d;
+}
+.guide-dialog {
+  position: fixed;
+  inset: 0;
+  width: 70vw;
+  max-width: 70vw;
+  height: 70dvh;
+  max-height: 70dvh;
+  margin: auto;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  background: transparent;
+  color: #422e19;
+}
+.guide-dialog::backdrop {
+  background: #080e17dc;
+}
+.guide-scroll {
+  position: relative;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 44px 12px 12px;
+  border: 6px double #8d5d27;
+  background: #f9edc8;
+  box-shadow: inset 0 0 0 3px #e3bd69;
+  overflow: hidden;
+}
+.guide-scroll::before {
+  content: '';
+  position: absolute;
+  top: 5px;
+  left: 10px;
+  right: 58px;
+  height: 8px;
+  border-block: 3px solid #8d5d27;
+  background: #e3bd69;
+}
+.guide-close {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+}
+.guide-scroll h2 {
+  margin: 0;
+  font-size: clamp(8px, 1.6vw, 14px);
+}
+.guide-copy {
+  margin: 0;
+  font-size: clamp(6px, 1.2vw, 10px);
+  line-height: 1.5;
+}
+.guide-screenshot {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  border: 3px solid #8d5d27;
+  outline: 2px solid #e3bd69;
+  background: #e9d3a1;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+.guide-screenshot img {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  object-fit: contain;
+  image-rendering: pixelated;
+}
+.guide-screenshot img[hidden] {
+  display: none;
+}
+.guide-screenshot figcaption {
+  font-size: 6px;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.guide-pages {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 7px;
+  margin-top: auto;
+}
+.guide-pages button {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+}
+@media (max-height: 450px) {
+  .map-heading {
+    padding-top: 6px;
+  }
+  .guide-scroll {
+    gap: 4px;
+    padding: 34px 8px 6px;
+  }
+  .guide-scroll h2 {
+    font-size: 8px;
+    padding-right: 40px;
+  }
+  .guide-copy {
+    font-size: 6px;
+    line-height: 1.2;
+  }
+}

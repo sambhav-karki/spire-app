@@ -198,6 +198,128 @@ app-root .battle-screen .arena .combatant .sprite-frame.boss-sprite {
   background: #ffe082;
   box-shadow: 20px 0 #ffe082;
 }
+.deck-launcher {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 1000;
+  padding: 4px;
+  font-size: 7px;
+}
+app-root .battle-header {
+  padding-left: 56px;
+}
+.deck-panel {
+  max-width: 620px;
+}
+.deck-cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.deck-entry {
+  min-width: 0;
+  padding: 8px;
+  border: 2px solid #64798d;
+  font-size: 8px;
+}
+.deck-entry span {
+  display: block;
+  color: var(--gold);
+}
+.deck-entry p {
+  margin: 4px 0 0;
+  font-size: 7px;
+}
+.deck-pages {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+}
+.enemy-stage {
+  position: relative;
+}
+.enemy-base-attack {
+  position: absolute;
+  right: 0;
+  top: 45%;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #ffe082;
+  background: #161f2b;
+  padding: 2px;
+  font-size: 8px;
+}
+.pixel-sword {
+  width: 6px;
+  height: 16px;
+  display: inline-block;
+  background: #d5eafa;
+  box-shadow: 0 4px #d5eafa;
+  clip-path: polygon(
+    33% 0,
+    66% 0,
+    66% 65%,
+    100% 65%,
+    100% 80%,
+    66% 80%,
+    66% 100%,
+    33% 100%,
+    33% 80%,
+    0 80%,
+    0 65%,
+    33% 65%
+  );
+}
+.sam-jr-cluster {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+.sam-jr-cluster img {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  object-fit: contain;
+  image-rendering: pixelated;
+  animation: boss-spin 2s steps(24) infinite;
+}
+app-root .battle-screen .arena .combatant .sprite-frame:has(.sam-jr-cluster) {
+  border: 0;
+  outline: 0;
+  box-shadow: none;
+  background: transparent;
+}
+.intent[data-intent='SPECIAL'] {
+  border-color: #ff7043;
+  color: #ffd180;
+}
+.intent[data-intent='SPECIAL'] > span {
+  display: block;
+}
+@media (max-height: 450px) {
+  .battle-screen .intent {
+    font-size: 7px;
+    padding: 1px;
+    line-height: 1.1;
+  }
+  .deck-entry {
+    padding: 4px;
+    font-size: 7px;
+  }
+  .deck-entry p {
+    font-size: 6px;
+    line-height: 1.3;
+  }
+  .battle-screen .intent[data-intent='SPECIAL'] {
+    font-size: 6px;
+    padding: 1px;
+    line-height: 1.1;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

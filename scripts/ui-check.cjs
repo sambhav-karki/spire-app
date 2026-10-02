@@ -12,6 +12,8 @@ const browser = spawn(
   [
     '--headless=new',
     '--disable-gpu',
+    '--disable-extensions',
+    '--disable-background-networking',
     '--no-first-run',
     '--no-default-browser-check',
     `--remote-debugging-port=${port}`,
@@ -86,7 +88,6 @@ async function tap(selector) {
     if (message.error) request.reject(new Error(JSON.stringify(message.error)));
     else request.resolve(message.result);
   };
-  await command('Page.enable');
   const url = `http://127.0.0.1:4200/?uiCheck=${Date.now()}`;
   await command('Page.navigate', { url });
   for (let attempt = 0; attempt < 60; attempt++) {
@@ -129,11 +130,11 @@ async function tap(selector) {
   await tap('.help-button');
   assert(
     await evaluate(
-      `document.querySelector('.help-dialog').open && document.querySelector('.viewport-wrapper').inert`,
+      `document.querySelector('.help-dialog:not(.deck-dialog)').open && document.querySelector('.viewport-wrapper').inert`,
     ),
     'Help must trap focus and make selection inert',
   );
-  await tap('.help-close');
+  await tap('.help-dialog:not(.deck-dialog) .help-close');
   await tap('.water-fighter');
   assert(
     await evaluate(
@@ -147,6 +148,15 @@ async function tap(selector) {
     `(() => { const app = ng.getComponent(document.querySelector('app-root')); app.selectRoom(app.map[1][0]); ng.applyChanges(app); })()`,
   );
   await delay(1100);
+  assert(
+    await evaluate(
+      `document.querySelectorAll('.sam-jr-cluster img').length === 4 && ng.getComponent(document.querySelector('app-root')).battle.enemy.name === 'Sam Jr'`,
+    ),
+    'Intro must fight four spinning Sam Jr avatars',
+  );
+  await evaluate(
+    `(() => { const app = ng.getComponent(document.querySelector('app-root')); const card = { id: 'intro-win', name: 'Win', cost: 0, damage: 100, description: '' }; app.battle.hand = [card]; app.play(card); app.returnToMap(); ng.applyChanges(app); })()`,
+  );
   assert(
     await evaluate(`(() => {
     const app = ng.getComponent(document.querySelector('app-root'));
@@ -203,12 +213,12 @@ async function tap(selector) {
     await tap('.help-button');
     assert(
       await evaluate(`(() => {
-      const panel = document.querySelector('.help-panel'), r = panel.getBoundingClientRect();
-      return r.top >= 0 && r.bottom <= innerHeight && panel.scrollHeight <= panel.clientHeight && document.querySelector('.help-dialog').contains(document.activeElement);
+      const panel = document.querySelector('.help-dialog:not(.deck-dialog) .help-panel'), r = panel.getBoundingClientRect();
+      return r.top >= 0 && r.bottom <= innerHeight && panel.scrollHeight <= panel.clientHeight && document.querySelector('.help-dialog:not(.deck-dialog)').contains(document.activeElement);
     })()`),
       'Help must fit and contain focus',
     );
-    await tap('.help-close');
+    await tap('.help-dialog:not(.deck-dialog) .help-close');
     const selectionShot = await command('Page.captureScreenshot', { format: 'png' });
     fs.writeFileSync(
       'artifacts/fighter-select-' + width + 'x' + height + '.png',
@@ -250,6 +260,27 @@ async function tap(selector) {
         handOverflow: hand.scrollWidth > hand.clientWidth,
         loadedPixelFont: document.fonts.check('10px "Press Start 2P"') };
     })()`);
+    await tap('.deck-launcher');
+    assert(
+      await evaluate(`(() => {
+      const app = ng.getComponent(document.querySelector('app-root'));
+      const panel = document.querySelector('.deck-panel'); const r = panel.getBoundingClientRect();
+      return app.isPaused && document.querySelector('.deck-dialog').open && panel.scrollHeight <= panel.clientHeight && r.top >= 0 && r.bottom <= innerHeight && document.querySelectorAll('.deck-entry').length === ng.getComponent(document.querySelector('app-root')).visibleDeck.length;
+    })()`),
+      'Deck viewer must pause gameplay and fit without scrolling',
+    );
+    await tap('.deck-pages button:last-child');
+    assert(
+      await evaluate(
+        `ng.getComponent(document.querySelector('app-root')).deckPage === Math.min(1, ng.getComponent(document.querySelector('app-root')).deckPages - 1)`,
+      ),
+      'Deck pages must show the whole persistent deck',
+    );
+    await tap('.deck-dialog .help-close');
+    assert(
+      await evaluate(`!ng.getComponent(document.querySelector('app-root')).isPaused`),
+      'Closing deck must resume gameplay',
+    );
     for (const name of ['battle', 'arena', 'hand', 'button', 'energy']) {
       assert(
         layout[name].top >= -1 && layout[name].bottom <= layout.viewport[1] + 1,
@@ -405,17 +436,17 @@ async function tap(selector) {
       await evaluate(`(() => {
       const app = ng.getComponent(document.querySelector('app-root'));
       const art = document.querySelector('.enemy-art');
-      const before = art.getBoundingClientRect().width;
+      const before = parseFloat(getComputedStyle(art).width);
       app.battle.enemy.hp = 151;
       const card = { id: 'phase-check', name: 'Phase Check', cost: 0, damage: 1, description: '' };
-      app.battle.hand = [card]; app.play(card); ng.applyChanges(app);
+      app.battle.hand = [card, ...app.battle.hand]; app.play(card); ng.applyChanges(app);
       const frame = document.querySelector('.enemy-sprite');
       const arena = document.querySelector('.arena').getBoundingClientRect();
       const enemy = document.querySelector('.enemy-stage').getBoundingClientRect();
       const avatar = document.querySelector('.boss-avatar');
       const avatarValid = avatar && avatar.complete && avatar.naturalWidth > 0 && getComputedStyle(avatar).animationName === 'boss-spin';
       const aura = app.playerType === 'WATER' ? 'red-aura' : 'blue-aura';
-      return avatarValid && app.battle.enemy.name === 'Sam the Dev' && app.battle.enemy.enraged && app.battle.enemyDamage === 36 && frame.classList.contains(aura) && art.getBoundingClientRect().width > before && enemy.top >= arena.top - 1 && enemy.bottom <= arena.bottom + 1 && document.scrollingElement.scrollHeight <= innerHeight;
+      return avatarValid && app.battle.enemy.name === 'Sam the Dev' && app.battle.enemy.enraged && app.battle.enemyDamage === 36 && frame.classList.contains(aura) && parseFloat(getComputedStyle(art).width) > before && enemy.top >= arena.top - 1 && enemy.bottom <= arena.bottom + 1 && document.scrollingElement.scrollHeight <= innerHeight;
     })()`),
       'Enraged boss must grow, show the opposite aura, double attacks, and fit',
     );
@@ -424,8 +455,70 @@ async function tap(selector) {
       'artifacts/enraged-boss-' + width + 'x' + height + '.png',
       Buffer.from(phaseShot.data, 'base64'),
     );
+    assert(
+      await evaluate(`(() => {
+      const app = ng.getComponent(document.querySelector('app-root'));
+      app.battle.enemy.intent = { type: 'SPECIAL', name: 'Sam-BHAV KARKI', value: 80, shield: 30 };
+      ng.applyChanges(app);
+      const intent = document.querySelector('.intent'), stage = document.querySelector('.enemy-stage').getBoundingClientRect(), arena = document.querySelector('.arena').getBoundingClientRect();
+      if (stage.top < arena.top - 1 || stage.bottom > arena.bottom + 1) throw new Error(JSON.stringify({ stage: stage.toJSON(), arena: arena.toJSON(), intent: intent.getBoundingClientRect().toJSON(), lineHeight: getComputedStyle(intent).lineHeight }));
+      return intent.textContent.includes('Sam-BHAV KARKI') && intent.textContent.includes('80 DMG') && stage.top >= arena.top - 1 && stage.bottom <= arena.bottom + 1;
+    })()`),
+      'Named specials must remain visible with a full hand',
+    );
+    if (width === 1280) {
+      const snapshot = await evaluate(`(() => {
+        const app = ng.getComponent(document.querySelector('app-root'));
+        const snapshot = { deck: app.playerDeck, block: app.battle.player.block, uses: app.battle.fireChainUses, last: app.battle.fireChainLastTurn };
+        app.playerDeck = app.playerDeck.map(card => ({ ...card, damageMultiplier: 2 }));
+        app.battle.player.block = 999;
+        app.battle.fireChainUses = 9; app.battle.fireChainLastTurn = app.battle.turn;
+        ng.applyChanges(app); return snapshot;
+      })()`);
+      for (const [stressWidth, stressHeight] of [
+        [320, 568],
+        [568, 320],
+        [640, 360],
+        [390, 844],
+        [1024, 768],
+        [1280, 800],
+      ]) {
+        await command('Emulation.setDeviceMetricsOverride', {
+          width: stressWidth,
+          height: stressHeight,
+          deviceScaleFactor: 1,
+          mobile: stressWidth < 769,
+        });
+        await delay(60);
+        assert(
+          await evaluate(`(() => {
+          const arena = document.querySelector('.arena').getBoundingClientRect(), message = document.querySelector('.battle-message').getBoundingClientRect();
+          const elements = document.querySelectorAll('.combatant h2, .player-buffs, .intent, .combatant .hp-track, .combatant .hp-label, .combatant .shield, .enemy-base-attack');
+          return [...elements].every(element => { const r = element.getBoundingClientRect(); return r.top >= arena.top - 1 && r.bottom <= arena.bottom - 3 && r.bottom <= message.top && r.left >= 0 && r.right <= innerWidth; }) && arena.bottom <= message.top && document.scrollingElement.scrollHeight <= innerHeight;
+        })()`),
+          'Buffs, Block and boss intent must stay above the divider through live resize at ' +
+            stressWidth +
+            'x' +
+            stressHeight,
+        );
+      }
+      await evaluate(`(() => {
+        const app = ng.getComponent(document.querySelector('app-root')); const snapshot = ${JSON.stringify(snapshot)};
+        app.playerDeck = snapshot.deck; app.battle.player.block = snapshot.block; app.battle.fireChainUses = snapshot.uses; app.battle.fireChainLastTurn = snapshot.last; ng.applyChanges(app);
+      })()`);
+      console.log('Live resize with stacked buffs, a full hand and enraged boss special passed.');
+    }
     await evaluate(
-      `(() => { const app = ng.getComponent(document.querySelector('app-root')); app.gameState = 'VICTORY'; ng.applyChanges(app); })()`,
+      `(() => { const app = ng.getComponent(document.querySelector('app-root')); app.battle.player.hp = 100; app.finishTurn(); ng.applyChanges(app); })()`,
+    );
+    assert(
+      await evaluate(
+        `ng.getComponent(document.querySelector('app-root')).battleMessage.includes('Sam used Sam-BHAV KARKI')`,
+      ),
+      'Battle log must name the special move',
+    );
+    await evaluate(
+      `(() => { const app = ng.getComponent(document.querySelector('app-root')); app.currentRoom.type = 'CREEP'; app.gameState = 'VICTORY'; ng.applyChanges(app); })()`,
     );
     assert(
       await evaluate(`(() => {
@@ -446,7 +539,7 @@ async function tap(selector) {
     );
     await evaluate(`(() => {
       const app = ng.getComponent(document.querySelector('app-root')); app.gameState = 'MAP'; app.battle = null;
-      while (app.map[2].length < 3) { const index = app.map[2].length; app.map[2].push({ id: '2.' + index, floor: 2, type: 'CREEP', isFog: true, isCompleted: false, nextRoomIds: [] }); }
+      while (app.map[2].length < 5) { const index = app.map[2].length; app.map[2].push({ id: '2.' + index, floor: 2, type: 'CREEP', isFog: true, isCompleted: false, nextRoomIds: [] }); }
       app.allRooms = app.map.flat(); ng.applyChanges(app);
     })()`);
     await delay(50);
@@ -457,7 +550,7 @@ async function tap(selector) {
       const overlay = document.querySelector('.map-overlay').getBoundingClientRect();
       return map.scrollWidth <= map.clientWidth + 1 && map.scrollHeight <= map.clientHeight + 1 && document.scrollingElement.scrollWidth <= innerWidth && document.scrollingElement.scrollHeight <= innerHeight && Math.abs(bounds.width - overlay.width) < 1 && Math.abs(bounds.height - overlay.height) < 1 && [...document.querySelectorAll('.room-btn')].every(button => { const r = button.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && r.top >= bounds.top && r.bottom <= bounds.bottom && r.bottom <= innerHeight && r.width >= 44; });
     })()`),
-      'Three-room map does not fit viewport',
+      'Five-room map does not fit viewport',
     );
     assert(
       await evaluate(`(() => {
@@ -471,9 +564,33 @@ async function tap(selector) {
     })()`),
       'Map lines must stay anchored after resize and restoration',
     );
+    await tap('.guide-launcher');
+    for (let page = 0; page < 7; page++) {
+      assert(
+        await evaluate(`(() => {
+        const dialog = document.querySelector('.guide-dialog'), panel = document.querySelector('.guide-scroll');
+        const r = dialog.getBoundingClientRect();
+        const screenshot = document.querySelector('.guide-screenshot')?.getBoundingClientRect();
+        return dialog.open && Math.abs(r.width - innerWidth * .7) < 1 && Math.abs(r.height - innerHeight * .7) < 1 && panel.scrollHeight <= panel.clientHeight && (!ng.getComponent(document.querySelector('app-root')).guideStep.image || screenshot?.height > 0) && ng.getComponent(document.querySelector('app-root')).guidePage === ${page};
+      })()`),
+        'All six guide pages must fit within 70% of the viewport',
+      );
+      if (page < 6) await tap('.guide-pages button:last-child');
+    }
+    await tap('.guide-close');
     await evaluate(
-      `(() => { const app = ng.getComponent(document.querySelector('app-root')); app.gameState = 'START'; ng.applyChanges(app); })()`,
+      `(() => { const app = ng.getComponent(document.querySelector('app-root')); app.currentRoom.type = 'BOSS'; app.gameState = 'VICTORY'; ng.applyChanges(app); })()`,
     );
+    assert(
+      await evaluate(`(() => {
+      const certificate = document.querySelector('.victory-certificate');
+      return certificate.scrollHeight <= certificate.clientHeight && [...document.querySelectorAll('.victory-certificate > *, .certificate-exit')].every(element => {
+        const r = element.getBoundingClientRect(); return getComputedStyle(element).display === 'none' || r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth;
+      }) && document.scrollingElement.scrollHeight <= innerHeight;
+    })()`),
+      'Entire certificate and exit must fit without scrolling',
+    );
+    await tap('.certificate-exit');
     assert(
       await evaluate(`(() => {
       return document.scrollingElement.scrollWidth <= innerWidth && document.scrollingElement.scrollHeight <= innerHeight && [...document.querySelectorAll('.title-screen > *')].every(element => { const r = element.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth; });

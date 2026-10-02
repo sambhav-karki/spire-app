@@ -1,62 +1,80 @@
----
+﻿---
 name: webslayer-spire
-description: Develop the Angular WebSlayer Spire map, encounters, card battles, title flow and synthesized audio.
+description: Develop WebSlayer Spire fighter selection, map traversal, elemental card battles, shops, help dialogs, responsive pixel UI and synthesized audio.
 ---
 
-# WebSlayer Spire architecture
+# WebSlayer Spire project context
 
-Read relevant source and tests before editing. Use standalone Angular and modern @if/@for templates. Keep pure domain rules independent of DOM, audio and presentation.
+Verified against the working tree on 2026-10-02. Read this file first, then only relevant source/tests. Source is authoritative; update affected notes after feature changes instead of appending session transcripts.
 
-## Worker boundaries and execution order
+## File map
 
-For upgrades explicitly requesting these workers, execute them in order: Worker 1 owns src/app/sound.service.ts; Worker 2 owns src/app/game-logic.ts; Worker 3 owns src/app/app.html and app.css; Worker 4 owns src/app/app.ts and this document. Shared pixel theme, title/pause/event/result skins, sprites, card/intent/HP skins and reduced motion live in src/styles.css; component CSS keeps viewport and responsive layout overrides. src/index.html loads Press Start 2P with fallback fonts and display=swap. Keep component styles within production size budgets.
+- Angular 22 standalone app, TypeScript 6, Vitest; modern @if/@for templates.
+- src/app/game-logic.ts: map generation/navigation and immutable combat rules. app.ts: run state, dialogs, UI actions, canvas and map measurement. app.html: views.
+- App loads app.css, victory.css, guide.css, combat-layout.css in that order. Final combat grid overrides belong in combat-layout.css; guide.css owns traversal help; victory.css owns the certificate. src/styles.css owns shared pixel theme, sprites, cards, intent/HP skins and reduced motion.
+- sound.service.ts: procedural Web Audio. src/index.html loads Press Start 2P with fallback and display=swap.
+- Tests: app.spec.ts includes app/map/combat behavior; game-logic.spec.ts covers shop attacks/chains/upgrades; sound.service.spec.ts covers audio.
+- Keep production component stylesheet budgets: warning 4kB, error 8kB.
+- Only when explicitly requested, worker ownership/order is sound service, domain rules, template/styles, then app state/documentation. Ordinary changes do not require workers.
 
-## State and run lifecycle
+## Run and map
 
-GameState is START | MAP | BATTLE | REST | TREASURE | SHOP | VICTORY | GAME_OVER. INITIAL_GAME_STATE is START. Pure roomGameState routes CREEP/ELITE/BOSS to BATTLE, REST to REST, TREASURE to TREASURE, SHOP/MERCHANT to SHOP and INTRO to MAP.
+GameState: START | SELECT_FIGHTER | MAP | BATTLE | REST | TREASURE | SHOP | VICTORY | GAME_OVER. Initial state is START. Start Run unlocks gesture audio and enters fighter selection; selecting FIRE (Ember Slayer) or WATER (Tide Guard) resets the run and enters MAP with MAP music. Restart retains the fighter; returning to title allows a fresh choice. Sound preferences survive resets.
 
-START shows title without revealing rooms. Start Run resets map, player, persistent deck, gold, battle, completion and traversal history; enters MAP; unlocks gesture audio and starts music. Floor 0 is cleared REST and the only initially unfogged floor. Reveal floor 1 after 150ms so Angular paints the initial fog. Callback guards destruction, pause and title return; resume reschedules interrupted initial reveal.
+Starter deck: five 1-energy Strikes (12 damage), four 1-energy Defends (8 block), one 2-energy Heavy Strike (28 damage). FIRE adds 3 damage to starter attacks; WATER adds 4 block to starter defense. Shop cards use their own values.
 
-Only unpaused MAP permits movement. Reject occupied room and fogged UI targets. Allow forward exits, uncompleted lateral rooms, completed lower rooms and direct parents. visitRoom reveals room and exits without completing encounters. INTRO completes immediately. Cleared rooms never repeat rewards.
+Floor 0 is cleared REST and initially the only unfogged room. Reveal floor 1 after 150ms so initial fog paints; guard destruction/pause/title and reschedule interrupted reveal on resume. Floor 1 INTRO is a Sam Jr battle. Floors 2 and 3 have 3-5 rooms each; floor 4 holds Sam the Dev. Some branches have no upward exit.
 
-Battle outcome becomes VICTORY or GAME_OVER. Victory persists HP, completes room and awards gold once: 20 creep, 35 elite, 100 boss. Boss victory records bossDefeated. Return to map preserves run; terminal restart creates a new run. REST heals 30% max HP or upgrades damage cards by 3; TREASURE grants 50 gold; SHOP/MERCHANT sells a 30%-HP heal for 30 gold or allows leaving. Buying requires missing HP and sufficient gold. Resolution completes once and returns to MAP.
+Only unpaused MAP allows movement; reject current/fogged targets. Allow direct exits, uncompleted lateral rooms, completed lower rooms and parents. A revealed next-floor exit unlocked by any completed room on the current floor stays selectable after exploring siblings: pass allRooms to canMoveToRoom and record its actual parent connection. visitRoom reveals room/exits; completion waits for encounter resolution. Cleared rooms never repeat rewards.
 
-Pause is an orthogonal isPaused flag, never a replacement gameState. All gameplay, navigation, restart and reward actions reject calls while paused. Preserve battle identity, turn, energy and cards. Native dialog.showModal traps browser focus; viewport becomes inert. Escape resumes. Close restores originating control focus. Return to Title cancels reveal/layout callbacks, clears battle and stops music; sound preferences survive. The next Start Run resets run data. Native dialog calls are guarded for browser/test compatibility.
+Conditional map ViewChild reconnects ResizeObserver and schedules requestAnimationFrame measurement of button centers relative to container. Preserve traversed/revealed connections across encounters; clear on reset. SVG normalized dash paths animate only on first reveal. Cancel timers/observers/frames/listeners on destruction; guard browser APIs with isPlatformBrowser.
 
-## Audio engine API
+Victory persists player HP and completes/rewards once: INTRO/CREEP 20 gold, ELITE 35, BOSS 100. REST heals 30% max HP or compounds attack damageMultiplier by 1.2; TREASURE gives 50 gold once. SHOP/MERCHANT heals 30% HP for 30 gold if injured; purchases leave shop open. Only Leave completes shop and returns to MAP.
 
-Inject public readonly SoundService into App. unlock(): Promise<void> creates/resumes AudioContext from user gestures and tolerates unsupported or denied audio. Gameplay never depends on audio availability. click() emits a 40ms descending square blip; card() emits ascending triangle chimes; hit() combines descending sawtooth and generated filtered noise. No external audio assets are used.
+## Cards and combat
 
-playMusic('MAP' | 'BATTLE') selects a procedural theme. MAP uses triangle melody and sine bass at 80 BPM; BATTLE uses square lead and bass at 144 BPM. Repeating the active track does not restart scheduling. Switching cancels old scheduling and fades old music voices over 15ms before stopping them. startMusic() resumes the selected theme or MAP; stopMusic() clears track intent. activeTrack exposes selection. Start/restart and map returns select MAP; entering combat selects BATTLE; title return stops music. setPaused(boolean) suspends music while retaining playback intent. Tab visibility gates scheduling. setMuted(boolean), setSfxVolume(number), setMusicVolume(number) update separate gains with finite values clamped to 0â€“1. Public local state: isMuted, sfxVolume, musicVolume. Diagnostics: audioState, isAvailable, isMusicPlaying. Preferences survive run resets in the same service instance.
+Combat functions return new objects without mutating inputs; separate persistent playerDeck from battle piles. Copy/shuffle with optional RNG, draw five, start each turn with three energy. Reject stale, unaffordable, paused and terminal actions. Damage consumes block; HP never goes negative. EndTurn executes the displayed intent, discards hand, then if alive resets player block, energy and discard allowance, increments turn and draws five. Expire previous enemy block before its action; new enemy block survives the following player turn. Recycle discard only when draw is empty.
 
-Valid room/button actions play click. Cards play chime and impact when enemy HP decreases. Enemy ATTACK emits impact; DEFEND and BUFF do not. One context and one outside-Angular look-ahead scheduler serve the app. Finished nodes disconnect; mute stops voices; destruction clears timers/listeners and closes context.
+Cards have unique IDs, cost, optional damage/block/effect/damageMultiplier and description. cardDamage and describeCard share effect calculations. Rest upgrades multiply attack scaling by 1.2 each time; round resolved damage, including chain bonuses; shield is unchanged.
 
-## Combat invariants
+Discard mode supports click or drag-to-discard: three replacements per turn, zero energy cost; unaffordable cards can be discarded. Battle tracks discardsRemaining, fireChainUses and fireChainLastTurn.
 
-Combatant owns name, current/max HP and block. Card owns unique instance ID, name, cost, optional damage/block and description. Enemy adds room type and advertised ATTACK/DEFEND/BUFF intent. BattleState owns snapshots, draw pile, hand, discard, energy, turn and enemyDamage. Persistent deck stays separate from battle piles.
+Shop skill costs 20 gold; repeated purchases append unique IDs to the persistent deck. WATER Tidal Strike: 1 energy, 15 damage +15 shield. FIRE Kindle: 1 energy, 15 initial damage, FIRE_CHAIN adds 15 base damage per previous use across copies within the same or consecutive turns. Skipping a turn resets the chain; upgrade multipliers scale both base and bonus.
 
-Combat functions return new objects and never mutate inputs. Battles shuffle copies, draw five cards and start with three energy. Optional RNG injection supports deterministic tests. Reject missing, unaffordable and terminal card actions. Play spends energy, resolves damage through block, grants block and discards. End turn expires old enemy block, executes exactly displayed intent, discards hand and, if alive, resets player block, refills energy, advances turn, derives next intent and draws five. New enemy block persists through the following player turn. Shuffle discard only when draw is empty. HP never goes negative.
+Enemies (HP/base attack): Sam Jr 45/6; Cultist 60/8; Gremlin Nob 120/14; Sam the Dev 300/18. Elite buffs +2 every third turn; boss defends for 12 when turn modulo 3 equals 2. Every fourth turn takes precedence: elite SPECIAL Nob Smash deals 20 plus attack growth and grants 20 shield; boss SPECIAL Sam-BHAV KARKI deals round(40 * enemyDamage / 18) and grants 30 shield. Execute exactly the advertised ATTACK/DEFEND/BUFF/SPECIAL intent.
 
-Cultist: 45 HP and 6 attack, always attacks. Gremlin Nob: 85 HP and 10 base attack, buffs +2 every third turn. Guardian: 240 HP and 14 attack, defends for 12 when turn modulo 3 equals 2. Display the exact intent executed by endTurn. Card numeric effects derive from damage/block fields so upgrades remain accurate.
+A surviving boss at or below half HP enrages once: max HP increases by 50, HP refills to new max, attack doubles and intent recalculates immediately. Every subsequent living endTurn grows attack by 1.5, rounded, including defense turns. Lethal damage does not trigger enrage. Aura contrasts fighter: red for WATER, blue for FIRE.
 
-## Map and responsive viewport lifecycle
+## Dialogs and result views
 
-MAP exists in a conditional view. ViewChild setter disconnects old ResizeObserver and schedules measurement whenever map reappears. requestAnimationFrame measures room-button centers relative to container; guard absent/destroyed views. Preserve traversed and revealed-connection sets across encounters; clear on restart. Newly revealed normalized SVG dash paths animate once; returning to map does not replay known paths. Destroy cleans timer, observer, frame and listener. Guard browser APIs with isPlatformBrowser.
+Pause is orthogonal isPaused, preserving battle identity/turn/cards/energy and rejecting gameplay actions. Native showModal traps focus; viewport is inert; Escape/close resumes and restores origin focus. Guard native dialog APIs for tests/unsupported browsers. Return to Title cancels reveal/layout callbacks, clears battle and stops music.
 
-A single fixed #bg-canvas sits at z-index 0, below the z-index 1 viewport. AfterViewInit initializes 240 drifting square-ring particles; one shared angle synchronizes rotation. Canvas backing dimensions follow window.innerWidth/innerHeight on resize. Outside-Angular requestAnimationFrame uses capped elapsed time for consistent speed, and pauses for settings, hidden tabs and reduced motion. Destroy cancels frames and listeners. Disable canvas smoothing and use pixelated CSS rendering. Map/battle/event panels are translucent. Revealed room buttons remain opaque with solid backgrounds and z-index 2 above the z-index 1 SVG overlay; only fogged buttons use opacity 0.2.
+Deck launcher is available during a run. Group by name, cost, damage, block, effect, multiplier and description, excluding instance ID; show counts and four groups per page. Different upgrades remain separate. Deck and map-only traversal guide set isPaused, pause audio/background and close through resume/closeSettings. Fighter selection element help uses separate helpOpen and focus origin.
 
-Viewport wrapper uses overflow-x:hidden, width:100vw, max-width:100% and border-box sizing. Map rooms shrink inside available width. Battle uses fixed host, height:100dvh, max-height:100dvh, hidden overflow and safe-area padding. Header, message, hand and footer reserve space; arena consumes remainder. Desktop stages are side by side; mobile enemy appears above hero; short landscape screens use compact status grids and side-by-side stages.
+Traversal guide has seven pages: paths, deck, shops, elites, treasure, rest, boss. Keep within 70% viewport width/height. Five screenshots: public/help-{paths,deck,shop,treasure,rest}.png; elite/boss use text only. failedGuideImages supplies placeholders on load failure. Screenshot conventions: public/HELP-SCREENSHOTS.md.
 
-Hand uses flex, 6px gaps, centered justification, bottom alignment, 100% width/max-width and shrinking cards. Never allow horizontal hand/map scrolling. Hide card artwork before semantic HP, intent or effects. Touch targets remain at least 44px with touch-action:manipulation; preserve browser zoom, accessible names and focus outlines. Affordable cards lift on hover/tap. Reduced motion disables decoration.
+Ordinary victory offers Continue, Start New Run and Exit to Title. Boss victory shows a certificate, 64 decorative confetti pieces, “Never Stop Gaming” -Sam, and Exit to Title. Keep certificate and action visible without scrolling across tested viewports.
 
-Settings launcher stays fixed top-right at 12px with z-index 1000. Dialog centers pixel-bordered panel over dark overlay, allows vertical overflow in short viewports, and contains music/SFX sliders, mute, resume and title actions. Title has WEBSLAYER SPIRE, animated crest, flickering PRESS START, Start Run and Settings.
+## Responsive UI and background
 
-Sprites remain CSS placeholders with HERO/CREEP/ELITE/BOSS badges. Preserve frame geometry and accessible labels when adding artwork. Use image-rendering:pixelated, dungeon slate/gold, red HP, blue block and amber energy.
+Fixed #bg-canvas at z-index 0; viewport z-index 1. 240 pixel particles: title square rings, FIRE rising flames, WATER drifting droplets. Outside-Angular animation uses capped elapsed time and pauses for dialogs, hidden tabs and reduced motion. Resize backing canvas to window dimensions; disable smoothing; clean up frames/listeners. Translucent panels; revealed rooms opaque at z-index 2 above SVG; fogged rooms opacity 0.2.
 
-## Validation
+Viewport prevents horizontal overflow; map rooms shrink to fit. Battle is fixed at 100dvh with safe-area padding. combat-layout.css provides shared grid rows so buffs, intent, names, sprites, HP and block stay above the arena divider during live resize. Hide fight-title/VS decoration. Show playerBuffs above hero, exact named enemy intent and base attack. Preserve final stylesheet ordering when editing older responsive rules.
 
-Use npm.cmd run build, npx.cmd tsc --noEmit -p tsconfig.app.json and npm.cmd test -- --watch=false in Windows PowerShell. Cover fog/navigation, deferred completion, immutable combat, costs/block/draw recycling, advertised intents, terminal/paused guards, reward idempotence, persistent HP, title/reset and conditional map restoration.
+Hand: centered shrinking flex cards, 6px gaps, bottom aligned; no horizontal scrolling. Hide artwork before semantic effects/HP/intent. Minimum 44px touch targets, touch-action:manipulation, browser zoom, accessible labels and focus outlines. Affordable cards lift; reduced motion disables decoration. CSS sprite placeholders keep HERO/CREEP/ELITE/BOSS labels and frame geometry. Pixel palette: slate/gold, red HP, blue block, amber energy.
 
-scripts/ui-check.cjs uses installed headless Chrome and dev server http://127.0.0.1:4200. Check viewport/control/stage bounds, tap targets, absent horizontal overflow, font loading, title/settings and map restoration at 1280x800, 390x844, 320x568, 844x390 and 568x320. Screenshots go to artifacts. Browser launch and production font fetching may require sandbox approval.
+## Audio
 
-Audio tests cover gesture-only initialization, single-context/scheduler behavior, oscillator SFX, volume/mute controls, paused and hidden-tab scheduling, unsupported browsers, and idempotent cleanup. Browser checks use trusted mouse input to unlock native audio, then verify running music, paused combat identity, focus containment, sliders, oscillator types, and retained settings on title return. `scripts/export-source.cjs` writes complete implementation files and their shared-style dependencies to `artifacts/donut-music-source.md`.
+Public injected SoundService: unlock(): Promise<void> creates/resumes one AudioContext from gestures; unsupported/denied audio never blocks gameplay. click: 40ms descending square; card: ascending triangle; hit: descending sawtooth plus generated filtered noise. No external audio assets.
+
+playMusic('MAP' | 'BATTLE'): MAP triangle melody/sine bass at 80 BPM; BATTLE square lead/bass at 144 BPM. Same track is idempotent; switches cancel scheduling and fade old voices over 15ms. startMusic resumes selection or MAP; stopMusic clears intent; activeTrack exposes selection. setPaused retains intent; visibility gates scheduling. setMuted/setSfxVolume/setMusicVolume use independent gains and finite values clamped to 0-1. State: isMuted, sfxVolume, musicVolume; diagnostics: audioState, isAvailable, isMusicPlaying.
+
+Valid buttons/rooms click; cards chime and hit when HP decreases; enemy ATTACK/SPECIAL hits, DEFEND/BUFF do not. One outside-Angular look-ahead scheduler; finished nodes disconnect, mute stops voices, destruction clears timers/listeners and closes context.
+
+## Validation and exports
+
+Windows PowerShell: npm.cmd run build; npx.cmd tsc --noEmit -p tsconfig.app.json; npm.cmd test -- --watch=false. Run appropriate checks for implementation changes; documentation-only edits need skill validation, not gameplay rebuilds.
+
+node scripts/ui-check.cjs requires development server at http://127.0.0.1:4200 and installed headless Chrome. Tests use Angular development debug APIs. Viewports: 1280x800, 390x844, 320x568, 844x390, 568x320. Covers bounds/tap targets/overflow/fonts, title/fighter selection/settings/audio, elemental themes, discard, deck pagination, shops, seven guide pages, certificate, map restoration and live resize with stacked buffs/full hand/enraged special. Screenshots go to artifacts; browser launch/font fetching may require sandbox escalation.
+
+scripts/export-source.cjs writes the original core bundle to artifacts/donut-music-source.md, but currently omits combat-layout.css, guide.css and victory.css. Include these explicitly when a complete current export is requested. Older artifacts are not source of truth. Do not claim checks passed from existing screenshots alone.

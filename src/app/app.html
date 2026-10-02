@@ -1,4 +1,16 @@
 <canvas #backgroundCanvas id="bg-canvas" aria-hidden="true"></canvas>
+@if (gameState !== 'START' && gameState !== 'SELECT_FIGHTER') {
+  <button
+    type="button"
+    class="action-btn deck-launcher"
+    [disabled]="isPaused"
+    (click)="openDeck()"
+    aria-haspopup="dialog"
+    aria-label="View your deck"
+  >
+    <span class="pixel-card-icon" aria-hidden="true"></span><span>Deck</span>
+  </button>
+}
 <button
   type="button"
   class="settings-launcher action-btn"
@@ -58,15 +70,21 @@
     </section>
   }
   @if (gameState !== 'BATTLE' && gameState !== 'START' && gameState !== 'SELECT_FIGHTER') {
-    <h1 class="center-text">WebSlayer Spire</h1>
-    <p class="center-text" aria-live="polite">
-      Currently standing in: <strong>Room {{ currentRoom.id }} ({{ currentRoom.type }})</strong>
-    </p>
+    <header class="map-heading">
+      <h1>Conquer the Spire Champion</h1>
+      @if (gameState === 'MAP') {
+        <button
+          type="button"
+          class="action-btn guide-launcher"
+          aria-haspopup="dialog"
+          (click)="openGuide()"
+        >
+          ? HELP
+        </button>
+      }
+    </header>
   }
   @if (gameState === 'MAP') {
-    <p class="center-text map-help">
-      Choose a glowing room to continue. Explore your floor or return to cleared rooms.
-    </p>
     <div class="map-space">
       <div #mapContainer class="map-container" aria-label="Dungeon map">
         <svg
@@ -129,14 +147,20 @@
 
   @if (gameState === 'BATTLE') {
     @if (battle; as combat) {
-      <section class="battle-screen" aria-labelledby="battle-title">
+      <section class="battle-screen" aria-label="Battle">
         <header class="battle-header">
-          <h1 id="battle-title">WebSlayer Spire</h1>
           <span>F{{ currentRoom.floor }} / TURN {{ combat.turn }}</span>
           <span class="gold">{{ gold }} GOLD</span>
         </header>
         <div class="arena">
           <article class="combatant hero-stage" aria-label="Player status">
+            @if (playerBuffs.length) {
+              <div class="player-buffs" role="status" aria-label="Active player buffs">
+                @for (buff of playerBuffs; track buff) {
+                  <span class="buff-badge">{{ buff }}</span>
+                }
+              </div>
+            }
             <h2>{{ combat.player.name }}</h2>
             <div
               class="sprite-frame hero-sprite"
@@ -144,7 +168,6 @@
               aria-label="Hero pixel sprite placeholder"
             >
               <span class="pixel-silhouette hero-art" aria-hidden="true"></span>
-              <span class="sprite-caption">[PLAYER SPRITE]</span>
             </div>
             <div
               class="hp-track"
@@ -172,6 +195,7 @@
             >
               @if (combat.enemy.enraged) {
                 <strong class="boss-phase">ENRAGED</strong>
+                <span class="enrage-growth">ATK ×1.5 / TURN</span>
               }
               @switch (combat.enemy.intent.type) {
                 @case ('ATTACK') {
@@ -188,6 +212,15 @@
                   }}</strong>
                   ATK
                 }
+                @case ('SPECIAL') {
+                  <strong>{{ combat.enemy.intent.name }}</strong>
+                  <span
+                    >{{ combat.enemy.intent.value }} DMG / +{{
+                      combat.enemy.intent.shield
+                    }}
+                    SHIELD</span
+                  >
+                }
               }
             </div>
             <h2>{{ combat.enemy.name }}</h2>
@@ -201,17 +234,28 @@
               role="img"
               [attr.aria-label]="
                 combat.enemy.name +
-                (combat.enemy.enraged ? ', enraged, attacks doubled' : '') +
+                (combat.enemy.enraged ? ', enraged, attack grows by 1.5 times each turn' : '') +
                 (combat.enemy.type === 'BOSS' ? ' avatar' : ' pixel sprite placeholder')
               "
             >
               @if (combat.enemy.type === 'BOSS') {
                 <img class="boss-avatar enemy-art" src="avatar.gif" alt="" aria-hidden="true" />
+              } @else if (combat.enemy.type === 'INTRO') {
+                <span class="sam-jr-cluster" aria-hidden="true">
+                  @for (copy of [0, 1, 2, 3]; track copy) {
+                    <img src="avatar.gif" alt="" />
+                  }
+                </span>
               } @else {
                 <span class="pixel-silhouette enemy-art" aria-hidden="true"></span>
-                <span class="sprite-caption">[ENEMY SPRITE]</span>
               }
             </div>
+            <span
+              class="enemy-base-attack"
+              aria-label="Enemy basic attack damage"
+              aria-live="polite"
+              ><span class="pixel-sword" aria-hidden="true"></span>{{ combat.enemyDamage }}</span
+            >
             <div
               class="hp-track"
               role="progressbar"
@@ -248,7 +292,7 @@
                 ', costs ' +
                 card.cost +
                 ' energy. ' +
-                card.description
+                cardDescription(card)
               "
             >
               <span class="card-top"
@@ -274,15 +318,7 @@
                 }
               </span>
               <span class="card-description">
-                @if (card.damage !== undefined) {
-                  Deal <strong>{{ card.damage }}</strong> damage.
-                }
-                @if (card.block !== undefined) {
-                  Gain <strong>{{ card.block }}</strong> block.
-                }
-                @if (card.damage === undefined && card.block === undefined) {
-                  {{ card.description }}
-                }
+                {{ cardDescription(card) }}
               </span>
             </button>
           } @empty {
@@ -324,12 +360,15 @@
       <h2 id="event-title">{{ eventTitle }}</h2>
       @switch (gameState) {
         @case ('REST') {
-          <p>Recover 30% of your maximum HP, or increase every attack card's damage by 3.</p>
+          <p>
+            Recover 30% of your maximum HP, or multiply every attack card's damage by 1.2 (rounded
+            to the nearest whole number).
+          </p>
           <button type="button" class="action-btn" (click)="resolveEvent('HEAL')">
             Rest and heal
           </button>
           <button type="button" class="action-btn" (click)="resolveEvent('UPGRADE')">
-            Upgrade attacks
+            Upgrade attacks &middot; 1.2&times; damage
           </button>
         }
         @case ('TREASURE') {
@@ -339,6 +378,21 @@
           </button>
         }
         @case ('SHOP') {
+          <p>Gold: {{ gold }} &middot; Deck: {{ playerDeck.length }} cards</p>
+          <p>
+            <strong>{{ shopAttackCard.name }}</strong> &middot; 1 energy<br />{{
+              shopAttackCard.description
+            }}
+          </p>
+          <button
+            type="button"
+            class="action-btn"
+            [disabled]="gold < attackCardPrice"
+            (click)="buyAttackCard()"
+          >
+            Buy {{ shopAttackCard.name }} &middot; {{ attackCardPrice }} gold
+          </button>
+          <p>Buy multiple copies to chain attacks. Purchases stay in your deck for this run.</p>
           <p>Buy a healing tonic to restore 30% of your maximum HP. Costs 30 gold.</p>
           <button
             type="button"
@@ -357,38 +411,169 @@
   }
 
   @if (gameState === 'VICTORY' || gameState === 'GAME_OVER') {
-    <section class="result-overlay" aria-labelledby="result-title">
-      <div class="result-panel" role="status">
-        @if (gameState === 'VICTORY') {
-          <h2 id="result-title">
-            {{ currentRoom.type === 'BOSS' ? 'Spire conquered!' : 'Battle won!' }}
-          </h2>
-          <p>{{ battle?.enemy?.name }} defeated. You earned {{ rewardGold }} gold.</p>
-          <div class="victory-actions">
-            <button type="button" class="action-btn continue-run" (click)="returnToMap()">
-              Continue
-            </button>
-            <button type="button" class="action-btn new-run" (click)="restart()">
-              Start New Run
-            </button>
-            <button type="button" class="action-btn exit-title" (click)="returnToTitle()">
-              Exit to Title
-            </button>
-          </div>
-        } @else {
-          <h2 id="result-title">No match for the developer</h2>
-          <p>
-            The Spire claimed another challenger. Your run ended on floor {{ currentRoom.floor }}.
-          </p>
-          <button type="button" class="action-btn" (click)="restart()">Try again</button>
-        }
-      </div>
-    </section>
+    @if (gameState === 'VICTORY' && currentRoom.type === 'BOSS') {
+      <section class="result-overlay boss-celebration" aria-labelledby="certificate-title">
+        <div class="pixel-confetti" aria-hidden="true">
+          @for (piece of confettiPieces; track $index) {
+            <span
+              [style.left.%]="piece.left"
+              [style.background]="piece.color"
+              [style.animation-delay.s]="piece.delay"
+              [style.animation-duration.s]="piece.duration"
+            ></span>
+          }
+        </div>
+        <div class="certificate-wrap">
+          <article class="victory-certificate" role="status">
+            <div class="certificate-stars" aria-hidden="true">★ ◆ ★</div>
+            <p class="certificate-kicker">CERTIFICATE OF VICTORY</p>
+            <h2 id="certificate-title">CONGRATULATIONS!</h2>
+            <p>This certifies that</p>
+            <strong class="certificate-name">{{ player.name }}</strong>
+            <p>defeated Sam the Dev<br />and conquered the Spire.</p>
+            <div class="certificate-seal" aria-hidden="true">★</div>
+            <blockquote>“Never Stop Gaming” <span>-Sam</span></blockquote>
+            <p class="certificate-kicker">CHAMPION · FINAL BOSS DEFEATED</p>
+          </article>
+          <button type="button" class="action-btn certificate-exit" (click)="returnToTitle()">
+            EXIT TO TITLE
+          </button>
+        </div>
+      </section>
+    } @else {
+      <section class="result-overlay" aria-labelledby="result-title">
+        <div class="result-panel" role="status">
+          @if (gameState === 'VICTORY') {
+            <h2 id="result-title">
+              {{ currentRoom.type === 'BOSS' ? 'Spire conquered!' : 'Battle won!' }}
+            </h2>
+            <p>{{ battle?.enemy?.name }} defeated. You earned {{ rewardGold }} gold.</p>
+            <div class="victory-actions">
+              <button type="button" class="action-btn continue-run" (click)="returnToMap()">
+                Continue
+              </button>
+              <button type="button" class="action-btn new-run" (click)="restart()">
+                Start New Run
+              </button>
+              <button type="button" class="action-btn exit-title" (click)="returnToTitle()">
+                Exit to Title
+              </button>
+            </div>
+          } @else {
+            <h2 id="result-title">No match for the developer</h2>
+            <p>
+              The Spire claimed another challenger. Your run ended on floor {{ currentRoom.floor }}.
+            </p>
+            <button type="button" class="action-btn" (click)="restart()">Try again</button>
+          }
+        </div>
+      </section>
+    }
   }
   @if (gameState === 'MAP' && bossDefeated) {
     <p class="center-text" role="status">Sam the Dev is defeated. The Spire is yours.</p>
   }
 </main>
+<dialog
+  #guideDialog
+  class="guide-dialog"
+  aria-labelledby="guide-title"
+  (cancel)="onSettingsCancel($event)"
+>
+  <section class="guide-scroll">
+    <button
+      type="button"
+      class="action-btn guide-close"
+      aria-label="Close traversal help"
+      (click)="resumeGame()"
+    >
+      X
+    </button>
+    <h2 id="guide-title">{{ guideStep.title }}</h2>
+    <p class="guide-copy">{{ guideStep.text }}</p>
+    @if (guideStep.image; as screenshot) {
+      <figure class="guide-screenshot">
+        <img
+          [src]="screenshot"
+          [alt]="guideStep.title + ' screenshot'"
+          [hidden]="failedGuideImages.has(screenshot)"
+          (error)="failedGuideImages.add(screenshot)"
+        />
+        @if (failedGuideImages.has(screenshot)) {
+          <figcaption>SCREENSHOT PLACEHOLDER<br />{{ guideStep.image }}</figcaption>
+        }
+      </figure>
+    }
+    <nav class="guide-pages" aria-label="Help pages">
+      <button
+        type="button"
+        class="action-btn"
+        aria-label="Previous help page"
+        [disabled]="guidePage === 0"
+        (click)="guidePage = guidePage - 1"
+      >
+        &#9664;
+      </button>
+      <span>{{ guidePage + 1 }} / {{ guidePages.length }}</span>
+      <button
+        type="button"
+        class="action-btn"
+        aria-label="Next help page"
+        [disabled]="guidePage + 1 === guidePages.length"
+        (click)="guidePage = guidePage + 1"
+      >
+        &#9654;
+      </button>
+    </nav>
+  </section>
+</dialog>
+<dialog
+  #deckDialog
+  class="help-dialog deck-dialog"
+  aria-labelledby="deck-title"
+  (cancel)="onSettingsCancel($event)"
+>
+  <section class="help-panel deck-panel">
+    <button
+      type="button"
+      class="action-btn help-close"
+      aria-label="Close deck"
+      (click)="resumeGame()"
+    >
+      X
+    </button>
+    <h2 id="deck-title">YOUR DECK / {{ playerDeck.length }} CARDS</h2>
+    <div class="deck-cards">
+      @for (group of visibleDeck; track group.key) {
+        <article class="deck-entry">
+          <strong>{{ group.card.name }}</strong
+          ><span class="deck-count">x{{ group.count }}</span>
+          <span>{{ group.card.cost }} ENERGY</span>
+          <p>{{ cardDescription(group.card) }}</p>
+        </article>
+      }
+    </div>
+    <nav class="deck-pages" aria-label="Deck pages">
+      <button
+        type="button"
+        class="action-btn"
+        [disabled]="deckPage === 0"
+        (click)="deckPage = deckPage - 1"
+      >
+        PREV
+      </button>
+      <span>{{ deckPage + 1 }} / {{ deckPages }}</span>
+      <button
+        type="button"
+        class="action-btn"
+        [disabled]="deckPage + 1 >= deckPages"
+        (click)="deckPage = deckPage + 1"
+      >
+        NEXT
+      </button>
+    </nav>
+  </section>
+</dialog>
 <dialog #helpDialog class="help-dialog" aria-labelledby="help-title" (cancel)="closeHelp($event)">
   <section class="help-panel">
     <button

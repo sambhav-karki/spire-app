@@ -21,7 +21,7 @@ export function randomNumGenerator(min: number, max: number): number {
 
 export function generateFloor(floorNum: number): Room[] {
   const floor: Room[] = [];
-  const rooms: number = randomNumGenerator(1, 3);
+  const rooms: number = randomNumGenerator(3, 5);
 
   for (let i = 0; i < rooms; i++) {
     floor.push({
@@ -167,6 +167,7 @@ export function roomGameState(type: RoomType): GameState {
     case 'CREEP':
     case 'ELITE':
     case 'BOSS':
+    case 'INTRO':
       return 'BATTLE';
     case 'REST':
       return 'REST';
@@ -175,12 +176,10 @@ export function roomGameState(type: RoomType): GameState {
     case 'SHOP':
     case 'MERCHANT':
       return 'SHOP';
-    case 'INTRO':
-      return 'MAP';
   }
 }
 
-export type BattleRoomType = 'CREEP' | 'ELITE' | 'BOSS';
+export type BattleRoomType = 'INTRO' | 'CREEP' | 'ELITE' | 'BOSS';
 
 export interface Combatant {
   name: string;
@@ -190,8 +189,10 @@ export interface Combatant {
 }
 
 export interface EnemyIntent {
-  type: 'ATTACK' | 'DEFEND' | 'BUFF';
+  type: 'ATTACK' | 'DEFEND' | 'BUFF' | 'SPECIAL';
   value: number;
+  name?: string;
+  shield?: number;
 }
 
 export interface Enemy extends Combatant {
@@ -206,6 +207,8 @@ export interface Card {
   cost: number;
   damage?: number;
   block?: number;
+  effect?: 'FIRE_CHAIN';
+  damageMultiplier?: number;
   description: string;
 }
 
@@ -220,10 +223,12 @@ export interface BattleState {
   turn: number;
   enemyDamage: number;
   discardsRemaining: number;
+  fireChainUses: number;
+  fireChainLastTurn: number;
 }
 
 export function isBattleRoom(type: RoomType): type is BattleRoomType {
-  return type === 'CREEP' || type === 'ELITE' || type === 'BOSS';
+  return type === 'INTRO' || type === 'CREEP' || type === 'ELITE' || type === 'BOSS';
 }
 
 export function createPlayer(): Combatant {
@@ -266,10 +271,39 @@ export function upgradeDeck(cards: Card[]): Card[] {
       ? { ...card }
       : {
           ...card,
-          damage: card.damage + 3,
-          description: `Deal ${card.damage + 3} damage.`,
+          damageMultiplier: (card.damageMultiplier ?? 1) * 1.2,
+          description: describeCard({
+            ...card,
+            damageMultiplier: (card.damageMultiplier ?? 1) * 1.2,
+          }),
         },
   );
+}
+
+export function createShopCard(element: 'FIRE' | 'WATER', id: string): Card {
+  const card: Card =
+    element === 'WATER'
+      ? { id, name: 'Tidal Strike', cost: 1, damage: 15, block: 15, description: '' }
+      : { id, name: 'Kindle', cost: 1, damage: 15, effect: 'FIRE_CHAIN', description: '' };
+  return { ...card, description: describeCard(card) };
+}
+
+export function cardDamage(card: Card, state?: BattleState): number {
+  const uses =
+    card.effect === 'FIRE_CHAIN' && state && state.fireChainLastTurn >= state.turn - 1
+      ? state.fireChainUses
+      : 0;
+  return Math.round(((card.damage ?? 0) + uses * 15) * (card.damageMultiplier ?? 1));
+}
+
+export function describeCard(card: Card, state?: BattleState): string {
+  const damage = card.damage === undefined ? '' : `Deal ${cardDamage(card, state)} damage.`;
+  const block = card.block === undefined ? '' : `Gain ${card.block} shield.`;
+  const chain =
+    card.effect === 'FIRE_CHAIN'
+      ? ` Each use adds ${Math.round(15 * (card.damageMultiplier ?? 1))} damage. Chain within a turn or across consecutive turns; skip a turn to reset.`
+      : '';
+  return [damage, block].filter(Boolean).join(' ') + chain;
 }
 
 function shuffle<T>(items: readonly T[], random: () => number): T[] {
@@ -299,8 +333,9 @@ export function createBattle(
   random: () => number = Math.random,
 ): BattleState {
   const enemies: Record<BattleRoomType, { name: string; hp: number; damage: number }> = {
-    CREEP: { name: 'Cultist', hp: 45, damage: 6 },
-    ELITE: { name: 'Gremlin Nob', hp: 100, damage: 12 },
+    INTRO: { name: 'Sam Jr', hp: 45, damage: 6 },
+    CREEP: { name: 'Cultist', hp: 60, damage: 8 },
+    ELITE: { name: 'Gremlin Nob', hp: 120, damage: 14 },
     BOSS: { name: 'Sam the Dev', hp: 300, damage: 18 },
   };
   const enemy = enemies[type];
@@ -326,6 +361,8 @@ export function createBattle(
     turn: 1,
     enemyDamage: enemy.damage,
     discardsRemaining: 3,
+    fireChainUses: 0,
+    fireChainLastTurn: 0,
   };
   drawHand(state, random);
   return state;
@@ -336,6 +373,15 @@ export function calculateEnemyIntent(
   turn: number,
   damage: number,
 ): EnemyIntent {
+  if (turn % 4 === 0 && type === 'ELITE')
+    return { type: 'SPECIAL', name: 'Nob Smash', value: 20 + Math.max(0, damage - 14), shield: 20 };
+  if (turn % 4 === 0 && type === 'BOSS')
+    return {
+      type: 'SPECIAL',
+      name: 'Sam-BHAV KARKI',
+      value: Math.round((40 * damage) / 18),
+      shield: 30,
+    };
   if (type === 'BOSS' && turn % 3 === 2) return { type: 'DEFEND', value: 12 };
   if (type === 'ELITE' && turn % 3 === 0) return { type: 'BUFF', value: 2 };
   return { type: 'ATTACK', value: damage };
@@ -378,6 +424,8 @@ function awakenBoss(state: BattleState): void {
   )
     return;
   state.enemy.enraged = true;
+  state.enemy.maxHp += 50;
+  state.enemy.hp = state.enemy.maxHp;
   state.enemyDamage *= 2;
   state.enemy.intent = calculateEnemyIntent(state.enemy.type, state.turn, state.enemyDamage);
 }
@@ -388,7 +436,11 @@ export function playCard(state: BattleState, cardId: string): BattleState {
   const index = next.hand.findIndex((card) => card.id === cardId);
   const card = next.hand.splice(index, 1)[0]!;
   next.energy -= card.cost;
-  applyDamage(next.enemy, card.damage ?? 0);
+  applyDamage(next.enemy, cardDamage(card, next));
+  if (card.effect === 'FIRE_CHAIN') {
+    next.fireChainUses = next.fireChainLastTurn >= next.turn - 1 ? next.fireChainUses + 1 : 1;
+    next.fireChainLastTurn = next.turn;
+  }
   awakenBoss(next);
   next.player.block += card.block ?? 0;
   next.discard.push(card);
@@ -424,6 +476,10 @@ export function endTurn(state: BattleState, random: () => number = Math.random):
   // into the next player turn so the displayed defense is meaningful.
   next.enemy.block = 0;
   switch (next.enemy.intent.type) {
+    case 'SPECIAL':
+      applyDamage(next.player, next.enemy.intent.value);
+      next.enemy.block += next.enemy.intent.shield ?? 0;
+      break;
     case 'ATTACK':
       applyDamage(next.player, next.enemy.intent.value);
       break;
@@ -440,6 +496,9 @@ export function endTurn(state: BattleState, random: () => number = Math.random):
   next.player.block = 0;
   next.energy = next.maxEnergy;
   next.turn++;
+  if (next.enemy.type === 'BOSS' && next.enemy.enraged) {
+    next.enemyDamage = Math.round(next.enemyDamage * 1.5);
+  }
   next.discardsRemaining = 3;
   next.enemy.intent = calculateEnemyIntent(next.enemy.type, next.turn, next.enemyDamage);
   drawHand(next, random);

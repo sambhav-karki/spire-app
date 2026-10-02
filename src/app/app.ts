@@ -24,6 +24,8 @@ import {
   createBattle,
   createPlayer,
   createStarterDeck,
+  createShopCard,
+  describeCard,
   discardCard,
   endTurn,
   generateMap,
@@ -60,7 +62,7 @@ interface DonutParticle {
   standalone: true,
   imports: [],
   templateUrl: './app.html',
-  styleUrl: './app.css',
+  styleUrls: ['./app.css', './victory.css', './guide.css', './combat-layout.css'],
   host: {
     '[class.battle-active]': "gameState === 'BATTLE'",
     '[class.fire-theme]': "playerType === 'FIRE'",
@@ -81,6 +83,113 @@ export class App implements AfterViewInit, OnDestroy {
     return this.battle?.discardsRemaining ?? 3;
   }
   @ViewChild('settingsDialog') private settingsDialog?: ElementRef<HTMLDialogElement>;
+  @ViewChild('deckDialog') private deckDialog?: ElementRef<HTMLDialogElement>;
+  @ViewChild('guideDialog') private guideDialog?: ElementRef<HTMLDialogElement>;
+  guidePage = 0;
+  readonly failedGuideImages = new Set<string>();
+  readonly guidePages = [
+    {
+      title: 'GLOWING PATHS',
+      image: 'help-paths.png',
+      text: 'Choose a glowing path. Paths become available after defeating a room, and not every room will guarantee a path. Explore open rooms on your floor, revisit cleared lower rooms, and use any next-floor path unlocked by a cleared room on your current floor.',
+    },
+    {
+      title: 'YOUR DECK',
+      image: 'help-deck.png',
+      text: 'Press the card icon with Deck below it to open and see your deck consisting of your cards/skills. Use the arrows to browse every card. Battles use energy; discard up to 3 cards per turn to draw replacements.',
+    },
+    {
+      title: 'SHOPS',
+      image: 'help-shop.png',
+      text: 'Spend gold at shops on healing or your elemental skill. Check the price and your gold before buying. You can also leave the shop without buying anything.',
+    },
+    {
+      title: 'ELITES',
+      image: null,
+      text: 'Some paths may lead to Elites, who are stronger enemies than basic creeps and give more gold. Creeps reward 20 gold; Elites reward 35 gold.',
+    },
+    {
+      title: 'TREASURE',
+      image: 'help-treasure.png',
+      text: 'Open treasure rooms to claim 50 gold once. Spend it on supplies and skills. Rest sites let you recover HP or upgrade your attacks before climbing higher.',
+    },
+    {
+      title: 'REST SITES',
+      image: 'help-rest.png',
+      text: 'Rest to restore 30% of your maximum HP, or upgrade your attacks. Choose the option that best prepares you for the next encounter.',
+    },
+    {
+      title: 'SAM THE DEV',
+      image: null,
+      text: 'At floor 4 you face the boss: Sam the Dev. Prepare your cards and HP before the final battle.',
+    },
+  ];
+  get guideStep() {
+    return this.guidePages[this.guidePage];
+  }
+
+  openGuide(): void {
+    if (this.isPaused || this.helpOpen || this.gameState !== 'MAP') return;
+    if (this.browser && document.activeElement instanceof HTMLElement)
+      this.settingsOrigin = document.activeElement;
+    this.guidePage = 0;
+    this.isPaused = true;
+    this.sound.setPaused(true);
+    this.syncBackground();
+    this.cdr.detectChanges();
+    const dialog = this.guideDialog?.nativeElement;
+    if (dialog && !dialog.open) {
+      if (typeof dialog.showModal === 'function') dialog.showModal();
+      else dialog.setAttribute('open', '');
+    }
+  }
+  deckPage = 0;
+  get deckPages(): number {
+    return Math.max(1, Math.ceil(this.deckGroups.length / 4));
+  }
+  get deckGroups(): { key: string; card: Card; count: number }[] {
+    const groups = new Map<string, { key: string; card: Card; count: number }>();
+    for (const card of this.playerDeck) {
+      const key = JSON.stringify([
+        card.name,
+        card.cost,
+        card.damage,
+        card.block,
+        card.effect,
+        card.damageMultiplier ?? 1,
+        card.description,
+      ]);
+      const group = groups.get(key);
+      if (group) group.count++;
+      else groups.set(key, { key, card, count: 1 });
+    }
+    return [...groups.values()];
+  }
+  get visibleDeck() {
+    return this.deckGroups.slice(this.deckPage * 4, this.deckPage * 4 + 4);
+  }
+
+  openDeck(): void {
+    if (
+      this.isPaused ||
+      this.helpOpen ||
+      this.gameState === 'START' ||
+      this.gameState === 'SELECT_FIGHTER'
+    )
+      return;
+    if (this.browser && document.activeElement instanceof HTMLElement)
+      this.settingsOrigin = document.activeElement;
+    this.deckPage = 0;
+    this.isPaused = true;
+    this.sound.setPaused(true);
+    this.syncBackground();
+    this.cdr.detectChanges();
+    const dialog = this.deckDialog?.nativeElement;
+    if (dialog && !dialog.open) {
+      if (typeof dialog.showModal === 'function') dialog.showModal();
+      else dialog.setAttribute('open', '');
+    }
+  }
   private settingsOrigin?: HTMLElement;
   private readonly cdr = inject(ChangeDetectorRef);
   private readonly zone = inject(NgZone);
@@ -129,6 +238,53 @@ export class App implements AfterViewInit, OnDestroy {
   rewardGold = 0;
   battleMessage = '';
   bossDefeated = false;
+  readonly attackCardPrice = 20;
+  readonly confettiPieces = Array.from({ length: 64 }, (_, index) => ({
+    left: (index * 37) % 100,
+    delay: -(index % 13) * 0.4,
+    duration: 3 + (index % 5) * 0.5,
+    color: ['#ffd86b', '#ff716b', '#57d9ed', '#b08bff', '#8ee89b'][index % 5],
+  }));
+
+  get playerBuffs(): string[] {
+    if (!this.battle) return [];
+    const buffs: string[] = [];
+    if (this.playerType === 'FIRE') buffs.push('FIERY STRIKES +3');
+    if (this.playerType === 'WATER') buffs.push('TIDAL GUARD +4');
+    if (this.battle.player.block > 0) buffs.push(`SHIELD ${this.battle.player.block}`);
+    const multiplier = Math.max(1, ...this.playerDeck.map((card) => card.damageMultiplier ?? 1));
+    if (multiplier > 1) buffs.push(`UPGRADED ATTACKS ×${Number(multiplier.toFixed(2))}`);
+    if (this.battle.fireChainUses > 0 && this.battle.fireChainLastTurn >= this.battle.turn - 1) {
+      buffs.push(`FIRE CHAIN +${this.battle.fireChainUses * 15} BASE DMG`);
+    }
+    return buffs;
+  }
+
+  get shopAttackCard(): Card {
+    return createShopCard(this.playerType === 'FIRE' ? 'FIRE' : 'WATER', 'shop-preview');
+  }
+
+  cardDescription(card: Card): string {
+    return describeCard(card, this.battle ?? undefined);
+  }
+
+  buyAttackCard(): void {
+    if (
+      this.isPaused ||
+      this.gameState !== 'SHOP' ||
+      this.currentRoom.isCompleted ||
+      this.gold < this.attackCardPrice ||
+      !this.playerType
+    )
+      return;
+    this.gold -= this.attackCardPrice;
+    this.playerDeck = [
+      ...this.playerDeck,
+      createShopCard(this.playerType, `shop-attack-${this.playerDeck.length}`),
+    ];
+    this.sound.card();
+    this.cdr.markForCheck();
+  }
 
   get eventTitle(): string {
     switch (this.currentRoom.type) {
@@ -395,8 +551,11 @@ export class App implements AfterViewInit, OnDestroy {
     this.battle = endTurn(this.battle);
     this.discardMode = false;
     this.draggingCardId = null;
-    if (intent.type === 'ATTACK') this.sound.hit();
+    if (intent.type === 'ATTACK' || intent.type === 'SPECIAL') this.sound.hit();
     switch (intent.type) {
+      case 'SPECIAL':
+        this.battleMessage = `${name === 'Sam the Dev' ? 'Sam' : name} used ${intent.name}. ${hp - this.battle.player.hp} damage; +${intent.shield} shield.`;
+        break;
       case 'ATTACK':
         this.battleMessage = `${name}: ${hp - this.battle.player.hp} damage taken.`;
         break;
@@ -445,6 +604,9 @@ export class App implements AfterViewInit, OnDestroy {
       if (this.gold < 30 || this.player.hp >= this.player.maxHp) return;
       this.gold -= 30;
       this.healPlayer();
+      this.sound.click();
+      this.cdr.markForCheck();
+      return;
     } else if (
       !((type === 'SHOP' || type === 'MERCHANT') && choice === 'LEAVE') &&
       !(type === 'INTRO' && choice === 'CONTINUE')
@@ -606,6 +768,16 @@ export class App implements AfterViewInit, OnDestroy {
   }
 
   private closeSettings(): void {
+    const guide = this.guideDialog?.nativeElement;
+    if (guide?.open) {
+      if (typeof guide.close === 'function') guide.close();
+      else guide.removeAttribute('open');
+    }
+    const deck = this.deckDialog?.nativeElement;
+    if (deck?.open) {
+      if (typeof deck.close === 'function') deck.close();
+      else deck.removeAttribute('open');
+    }
     const dialog = this.settingsDialog?.nativeElement;
     if (dialog?.open) {
       if (typeof dialog.close === 'function') dialog.close();

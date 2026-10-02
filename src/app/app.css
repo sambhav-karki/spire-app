@@ -72,7 +72,7 @@
   align-items: center;
   width: 100%;
   min-height: 0;
-  gap: clamp(8px, 3vw, 24px);
+  gap: clamp(4px, 1vw, 12px);
   position: relative;
 }
 .room-btn {
@@ -84,11 +84,12 @@
   height: auto;
   max-height: 18cqh;
   min-height: min(44px, 18cqh);
-  min-width: min(clamp(60px, 18vw, 110px), 28%);
+  min-width: 0;
   flex: 0 1 110px;
   gap: min(4px, 1cqh);
-  padding: min(clamp(6px, 1.5dvh, 12px), 2cqh) clamp(10px, 2.5vw, 18px);
-  font-size: clamp(8px, 1.8vw, 12px);
+  padding: min(clamp(6px, 1.5dvh, 12px), 2cqh) 2px;
+  font-size: clamp(6px, 1.5vw, 10px);
+  overflow-wrap: anywhere;
   line-height: 1.4;
   text-align: center;
   touch-action: manipulation;

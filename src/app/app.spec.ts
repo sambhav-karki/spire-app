@@ -32,6 +32,63 @@ describe('App', () => {
     expect(app.gameState).toBe('START');
   });
 
+  it('groups matching deck cards while keeping upgraded and different skills separate', () => {
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+    const strike = {
+      id: 'one',
+      name: 'Strike',
+      cost: 1,
+      damage: 12,
+      description: 'Deal 12 damage.',
+    };
+    app.playerDeck = [
+      strike,
+      { ...strike, id: 'two' },
+      { ...strike, id: 'three' },
+      { ...strike, id: 'upgraded', damageMultiplier: 1.2 },
+    ];
+    expect(app.deckGroups.map((group) => group.count)).toEqual([3, 1]);
+    expect(app.deckGroups[0].card).toBe(strike);
+    expect(app.deckPages).toBe(1);
+    expect(app.playerDeck.length).toBe(4);
+    fixture.destroy();
+  });
+
+  it('shows active buffs above the hero and removes the fight title', async () => {
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+    app.playerType = 'FIRE';
+    app.gameState = 'BATTLE';
+    app.battle = createBattle('BOSS', app.player, app.playerDeck);
+    app.battle.player.block = 15;
+    app.battle.fireChainUses = 2;
+    app.battle.fireChainLastTurn = 1;
+    await fixture.whenStable();
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('.player-buffs')?.textContent).toContain('SHIELD 15');
+    expect(root.querySelector('.player-buffs')?.textContent).toContain('FIRE CHAIN +30');
+    expect(root.querySelector('.battle-header')?.textContent).not.toContain('WebSlayer');
+    app.battle.fireChainLastTurn = -1;
+    expect(app.playerBuffs.some((buff) => buff.includes('FIRE CHAIN'))).toBe(false);
+  });
+
+  it('celebrates the final boss with a certificate, confetti, and an exit to title', async () => {
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+    app.currentRoom = app.allRooms.find((room) => room.type === 'BOSS')!;
+    app.gameState = 'VICTORY';
+    await fixture.whenStable();
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('.victory-certificate')?.textContent).toContain('CONGRATULATIONS!');
+    expect(root.querySelector('blockquote')?.textContent).toContain('Never Stop Gaming');
+    expect(root.querySelector('blockquote')?.textContent).toContain('-Sam');
+    expect(root.querySelectorAll('.pixel-confetti span').length).toBe(64);
+    expect(root.querySelector('.continue-run')).toBeNull();
+    (root.querySelector('.certificate-exit') as HTMLButtonElement).click();
+    expect(app.gameState).toBe('START');
+  });
+
   it('should render title', async () => {
     const fixture = TestBed.createComponent(App);
     await fixture.whenStable();
@@ -333,7 +390,7 @@ describe('App', () => {
 
 describe('Dungeon rules', () => {
   it('routes encounters to the dedicated game states', () => {
-    expect(roomGameState('INTRO')).toBe('MAP');
+    expect(roomGameState('INTRO')).toBe('BATTLE');
     expect(roomGameState('CREEP')).toBe('BATTLE');
     expect(roomGameState('ELITE')).toBe('BATTLE');
     expect(roomGameState('BOSS')).toBe('BATTLE');
@@ -365,8 +422,8 @@ describe('Dungeon rules', () => {
       expect(map[4][0].type).toBe('BOSS');
       expect(rooms.filter((r) => !r.isFog).map((r) => r.floor)).toEqual([0]);
       for (const floor of map.slice(2, -1)) {
-        expect(floor.length).toBeGreaterThanOrEqual(1);
-        expect(floor.length).toBeLessThanOrEqual(3);
+        expect(floor.length).toBeGreaterThanOrEqual(3);
+        expect(floor.length).toBeLessThanOrEqual(5);
       }
       const reached = new Set([rooms[0].id]);
       for (const current of rooms) {
@@ -423,6 +480,33 @@ describe('Dungeon rules', () => {
 });
 
 describe('Combat rules', () => {
+  it('makes Sam Jr the original creep strength and strengthens later encounters', () => {
+    const junior = createBattle('INTRO', createPlayer(), createStarterDeck());
+    expect(junior.enemy.name).toBe('Sam Jr');
+    expect(junior.enemy.hp).toBe(45);
+    expect(junior.enemyDamage).toBe(6);
+    expect(createBattle('CREEP', createPlayer(), createStarterDeck()).enemyDamage).toBe(8);
+    expect(createBattle('ELITE', createPlayer(), createStarterDeck()).enemyDamage).toBe(14);
+  });
+
+  it('executes named specials exactly as advertised, with shields surviving into the player turn', () => {
+    for (const type of ['ELITE', 'BOSS'] as const) {
+      let state = createBattle(type, createPlayer(), createStarterDeck());
+      for (let turn = 1; turn < 4; turn++) {
+        state.player.block = 100;
+        state = endTurn(state);
+      }
+      const intent = state.enemy.intent;
+      expect(intent.type).toBe('SPECIAL');
+      expect(intent.name).toBe(type === 'BOSS' ? 'Sam-BHAV KARKI' : 'Nob Smash');
+      expect(intent.shield).toBe(type === 'BOSS' ? 30 : 20);
+      expect(intent.value).toBe(type === 'BOSS' ? 40 : 22);
+      const next = endTurn(state);
+      expect(next.player.hp).toBe(state.player.hp - intent.value);
+      expect(next.enemy.block).toBe(intent.shield);
+      expect(state.enemy.block).toBe(0);
+    }
+  });
   const battle = () => createBattle('CREEP', createPlayer(), createStarterDeck(), () => 0.5);
 
   it('cycles only three cards per turn without spending energy or mutating input', () => {
@@ -471,7 +555,7 @@ describe('Combat rules', () => {
     expect(state.enemy.hp).toBe(300);
     expect(state.enemyDamage).toBe(18);
     expect(state.enemy.intent).toEqual({ type: 'ATTACK', value: 18 });
-    expect(createBattle('ELITE', player, deck).enemy.hp).toBe(100);
+    expect(createBattle('ELITE', player, deck).enemy.hp).toBe(120);
     expect(state.hand.length).toBe(5);
     expect(state.deck.length).toBe(5);
     expect(state.energy).toBe(3);
@@ -486,12 +570,12 @@ describe('Combat rules', () => {
     state.hand = [{ id: 'attack', name: 'Attack', cost: 1, damage: 12, description: '' }];
     state.enemy.block = 5;
     const next = playCard(state, 'attack');
-    expect(next.enemy.hp).toBe(38);
+    expect(next.enemy.hp).toBe(53);
     expect(next.enemy.block).toBe(0);
     expect(next.energy).toBe(2);
     expect(next.discard[0]!.id).toBe('attack');
     expect(next.hand).toEqual([]);
-    expect(state.enemy.hp).toBe(45);
+    expect(state.enemy.hp).toBe(60);
     expect(state.hand.length).toBe(1);
     expect(playCard(next, 'attack')).toBe(next);
     state.energy = 0;
@@ -564,18 +648,24 @@ describe('Combat rules', () => {
     expect(state.enemy.intent).toEqual({ type: 'BUFF', value: 2 });
     const next = endTurn(state, () => 0.5);
     expect(next.player.hp).toBe(state.player.hp);
-    expect(next.enemyDamage).toBe(14);
-    expect(next.enemy.intent).toEqual({ type: 'ATTACK', value: 14 });
-    expect(state.enemyDamage).toBe(12);
-    expect(endTurn(next, () => 0.5).player.hp).toBe(next.player.hp - 14);
+    expect(next.enemyDamage).toBe(16);
+    expect(next.enemy.intent).toEqual({
+      type: 'SPECIAL',
+      name: 'Nob Smash',
+      value: 22,
+      shield: 20,
+    });
+    expect(state.enemyDamage).toBe(14);
+    expect(endTurn(next, () => 0.5).player.hp).toBe(next.player.hp - 22);
   });
 
-  it('enrages the boss exactly at half HP and doubles its displayed attack only once', () => {
+  it('doubles attack on enrage then grows it by 1.5 every turn including defense turns', () => {
     const state = createBattle('BOSS', createPlayer(), createStarterDeck());
     state.enemy.hp = 151;
     state.hand = [{ id: 'threshold', name: 'Hit', cost: 0, damage: 1, description: '' }];
     const enraged = playCard(state, 'threshold');
-    expect(enraged.enemy.hp).toBe(150);
+    expect(enraged.enemy.hp).toBe(350);
+    expect(enraged.enemy.maxHp).toBe(350);
     expect(enraged.enemy.enraged).toBe(true);
     expect(enraged.enemyDamage).toBe(36);
     expect(enraged.enemy.intent).toEqual({ type: 'ATTACK', value: 36 });
@@ -586,9 +676,29 @@ describe('Combat rules', () => {
     expect(attacked.enemy.intent).toEqual({ type: 'DEFEND', value: 12 });
     attacked.hand = [{ id: 'again', name: 'Hit', cost: 0, damage: 1, description: '' }];
     const again = playCard(attacked, 'again');
-    expect(again.enemyDamage).toBe(36);
+    expect(attacked.enemyDamage).toBe(54);
+    expect(again.enemyDamage).toBe(54);
+    expect(again.enemy.maxHp).toBe(350);
+    expect(again.enemy.hp).toBe(349);
     expect(again.enemy.intent).toEqual({ type: 'DEFEND', value: 12 });
-    expect(endTurn(again).enemy.intent).toEqual({ type: 'ATTACK', value: 36 });
+    const thirdTurn = endTurn(again);
+    expect(thirdTurn.enemy.intent).toEqual({ type: 'ATTACK', value: 81 });
+    thirdTurn.player.block = 100;
+    expect(endTurn(thirdTurn).enemyDamage).toBe(122);
+  });
+
+  it('does not repeat the boss heal after crossing half HP in the enraged phase', () => {
+    const state = createBattle('BOSS', createPlayer(), createStarterDeck());
+    state.enemy.enraged = true;
+    state.enemy.maxHp = 350;
+    state.enemy.hp = 176;
+    state.enemyDamage = 36;
+    state.hand = [{ id: 'second-threshold', name: 'Hit', cost: 0, damage: 1, description: '' }];
+    const next = playCard(state, 'second-threshold');
+    expect(next.enemy.hp).toBe(175);
+    expect(next.enemy.maxHp).toBe(350);
+    expect(next.enemyDamage).toBe(36);
+    expect(state.enemy.hp).toBe(176);
   });
 
   it('does not enrage above half HP, on lethal damage, or for other enemy types', () => {

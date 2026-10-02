@@ -1,0 +1,157 @@
+/* Shared grid rows keep all status text above the arena divider during resize. */
+.battle-screen {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto auto;
+  min-height: 0;
+}
+.arena {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: stretch;
+  position: relative;
+  padding: 4px 12px 10px;
+  gap: 16px;
+  overflow: hidden;
+}
+.arena .arena-vs {
+  display: none;
+}
+.arena .combatant {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto auto;
+  grid-template-areas: 'top' 'name' 'sprite' 'health' 'hp' 'block';
+  align-self: stretch;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  gap: 3px;
+  align-items: center;
+  justify-items: center;
+  font-size: clamp(6px, 1vw, 10px);
+  line-height: 1.2;
+}
+.arena .player-buffs,
+.arena .intent {
+  grid-area: top;
+  width: 100%;
+  min-width: 0;
+}
+.arena .player-buffs {
+  gap: 2px;
+  max-width: 100%;
+}
+.arena .buff-badge {
+  font-size: clamp(5px, 1vw, 8px);
+  padding: 2px;
+  line-height: 1.2;
+}
+.arena .combatant h2 {
+  grid-area: name;
+  font-size: clamp(6px, 1vw, 10px);
+}
+.arena .enemy-stage h2 {
+  padding-right: 36px;
+}
+.arena .intent {
+  font-size: clamp(6px, 1vw, 9px);
+  padding: 2px;
+  line-height: 1.2;
+}
+.arena .combatant .sprite-frame {
+  grid-area: sprite;
+  min-height: 0;
+  height: 100%;
+  width: 100%;
+  max-height: 120px;
+  max-width: 120px;
+  align-self: center;
+}
+.battle-screen .arena .combatant .sprite-frame.boss-sprite {
+  height: 100%;
+  width: 100%;
+  max-height: 180px;
+  max-width: 180px;
+}
+.arena .boss-avatar {
+  width: 70%;
+  height: 70%;
+  object-fit: contain;
+  max-width: 100%;
+  max-height: 100%;
+}
+.arena .boss-enraged .boss-avatar {
+  width: 90%;
+  height: 90%;
+}
+.arena .boss-enraged {
+  overflow: hidden;
+}
+.arena .hp-track {
+  grid-area: health;
+}
+.arena .hp-label {
+  grid-area: hp;
+  font-size: 7px;
+}
+.arena .shield {
+  grid-area: block;
+  font-size: 7px;
+}
+.arena .status-effects {
+  display: none;
+}
+.arena .enemy-base-attack {
+  position: static;
+  grid-area: name;
+  justify-self: end;
+  align-self: center;
+  font-size: 7px;
+  padding: 0;
+  line-height: 1;
+}
+.battle-screen .battle-message {
+  height: auto;
+  min-height: 20px;
+  max-height: 32px;
+  font-size: 8px;
+  line-height: 1.3;
+}
+.battle-screen .hand {
+  min-height: 0;
+  padding: 8px 0 4px;
+}
+@media (max-height: 450px) {
+  .arena {
+    padding: 2px 4px 6px;
+    gap: 12px;
+  }
+  .arena .combatant {
+    gap: 2px;
+  }
+  .arena .combatant .sprite-frame {
+    border-width: 1px;
+    outline: 0;
+  }
+  .arena .buff-badge {
+    font-size: 5px;
+    padding: 1px;
+  }
+  .arena .intent {
+    font-size: 6px;
+    padding: 1px;
+    line-height: 1.1;
+  }
+  .arena .hp-label,
+  .arena .shield {
+    font-size: 6px;
+  }
+  .battle-screen .card-description {
+    font-size: 6px;
+    line-height: 1.2;
+  }
+  .battle-screen .card-title {
+    font-size: 6px;
+    line-height: 1.2;
+  }
+}
