@@ -1,0 +1,330 @@
+:host {
+  display: block;
+  min-height: 100dvh;
+  overflow-x: hidden;
+}
+#bg-canvas {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  pointer-events: none;
+  z-index: 0;
+  image-rendering: pixelated;
+}
+.viewport-wrapper {
+  position: relative;
+  z-index: 1;
+  width: 100vw;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow-x: hidden;
+  padding: 20px 12px;
+}
+
+.viewport-wrapper > h1 {
+  padding-right: 52px;
+  font-size: clamp(10px, 3.5vw, 16px);
+}
+
+.map-scroll {
+  width: 100%;
+  padding: 12px 0;
+}
+.map-container {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 48px;
+  padding: 24px 8px;
+  margin: auto;
+  width: 100%;
+  max-width: 440px;
+  background: #182532b3;
+}
+.floor-row {
+  display: flex;
+  justify-content: center;
+  gap: clamp(6px, 3vw, 24px);
+  position: relative;
+}
+.room-btn {
+  position: relative;
+  z-index: 2;
+  opacity: 1;
+  background-color: #161f2b;
+  width: 112px;
+  max-width: 112px;
+  min-width: 44px;
+  flex: 0 1 112px;
+  padding: 2px;
+  font-size: clamp(7px, 2vw, 8px);
+}
+.room-btn.completed-room {
+  opacity: 1;
+  background-color: #161f2b;
+  border-color: #37474f;
+  color: #78909c;
+}
+.room-btn.fog-room {
+  opacity: 0.2;
+}
+.map-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+}
+:host.battle-active {
+  position: fixed;
+  inset: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+:host.battle-active .viewport-wrapper {
+  padding: 0;
+}
+.battle-screen {
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: max(8px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right))
+    max(8px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  background: #111c2980;
+}
+.event-screen,
+.result-panel {
+  background: #182532e6;
+}
+.battle-header,
+.battle-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.battle-header {
+  padding-right: 60px;
+  min-height: 48px;
+}
+.battle-header h1 {
+  font-size: 12px;
+  margin: 0;
+}
+
+.arena {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  gap: 12px;
+  border-bottom: 4px solid #344457;
+}
+.combatant {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.hero-stage {
+  align-self: flex-end;
+  padding-bottom: 8px;
+}
+
+.hand {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  padding: 14px 0 6px;
+  align-items: flex-end;
+  justify-content: center;
+}
+.card {
+  flex: 0 1 146px;
+  min-width: 44px;
+  max-width: 146px;
+  padding: clamp(2px, 1vw, 8px);
+  overflow-wrap: anywhere;
+}
+@media (max-width: 768px) {
+  .battle-header {
+    font-size: 8px;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .battle-header h1 {
+    font-size: 9px;
+  }
+  .arena {
+    flex-direction: column;
+    justify-content: space-evenly;
+    gap: 6px;
+  }
+  .enemy-stage {
+    order: -1;
+  }
+  .hero-stage {
+    align-self: center;
+    padding: 0;
+  }
+  .arena-vs,
+  .status-effects {
+    display: none;
+  }
+  .combatant {
+    gap: 3px;
+  }
+  .combatant h2,
+  .intent {
+    font-size: 8px;
+  }
+  .sprite-frame {
+    width: 64px;
+    height: 64px;
+  }
+  .elite-sprite {
+    width: 76px;
+    height: 76px;
+  }
+  .boss-sprite {
+    width: 88px;
+    height: 88px;
+  }
+  .intent {
+    padding: 3px;
+  }
+  .card {
+    font-size: 7px;
+    gap: 3px;
+  }
+  .card-art,
+  .card-type {
+    display: none;
+  }
+  .card-title {
+    min-height: 24px;
+  }
+  .card-cost {
+    width: 20px;
+    height: 20px;
+  }
+  .card-description {
+    font-size: 7px;
+  }
+  .battle-actions {
+    gap: 6px;
+  }
+  .end-turn {
+    font-size: 8px;
+    padding: 8px;
+  }
+  .pile-counts {
+    font-size: 7px;
+  }
+}
+@media (max-height: 700px) {
+  .battle-screen {
+    gap: 4px;
+  }
+  .combatant {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    grid-template-areas: 'name name' 'sprite health' 'sprite hp' 'sprite block';
+    column-gap: 8px;
+  }
+  .enemy-stage {
+    grid-template-areas: 'intent intent' 'name name' 'sprite health' 'sprite hp' 'sprite block';
+  }
+  .sprite-frame {
+    grid-area: sprite;
+    width: 64px;
+    height: 64px;
+  }
+  .combatant h2 {
+    grid-area: name;
+  }
+  .intent {
+    grid-area: intent;
+  }
+  .hp-track {
+    grid-area: health;
+  }
+  .hp-label {
+    grid-area: hp;
+  }
+  .shield {
+    grid-area: block;
+  }
+  .status-effects,
+  .arena-vs {
+    display: none;
+  }
+  .card-art {
+    height: 28px;
+  }
+  .card-title {
+    min-height: 0;
+  }
+  .energy-orb {
+    height: 44px;
+    width: 60px;
+  }
+}
+@media (max-height: 450px) {
+  .arena {
+    flex-direction: row;
+  }
+  .hero-stage {
+    align-self: center;
+  }
+  .combatant {
+    gap: 2px;
+  }
+  .sprite-frame {
+    width: 44px;
+    height: 44px;
+  }
+  .hp-track {
+    width: 120px;
+  }
+  .battle-message {
+    height: 20px;
+  }
+  .card-art,
+  .sprite-caption,
+  .gold {
+    display: none;
+  }
+  .hand {
+    padding: 8px 0 2px;
+  }
+  .card {
+    padding: 2px;
+  }
+  .settings-panel {
+    padding: 10px;
+    gap: 4px;
+  }
+  .title-screen {
+    gap: 6px;
+  }
+  .title-crest {
+    font-size: 44px;
+  }
+  .title-screen h1 {
+    font-size: 20px;
+  }
+}
