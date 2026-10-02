@@ -88,11 +88,7 @@ export function generateMap(): Room[][] {
   return map;
 }
 
-export function canMoveToRoom(
-  currentRoom: Room,
-  targetRoom: Room,
-  _allRooms: Room[] = [],
-): boolean {
+export function canMoveToRoom(currentRoom: Room, targetRoom: Room, allRooms: Room[] = []): boolean {
   //Cannot click the room you are already standing in
   if (currentRoom.id === targetRoom.id) {
     return false;
@@ -103,6 +99,18 @@ export function canMoveToRoom(
   if (isForwardExit) {
     return true;
   }
+
+  // Cleared branches on this floor remain usable after exploring a sibling room.
+  const isUnlockedFloorExit =
+    targetRoom.floor === currentRoom.floor + 1 &&
+    !targetRoom.isFog &&
+    allRooms.some(
+      (room) =>
+        room.floor === currentRoom.floor &&
+        room.isCompleted &&
+        room.nextRoomIds.includes(targetRoom.id),
+    );
+  if (isUnlockedFloorExit) return true;
 
   //Lateral Step: Moving between non-completed rooms on the same floor
   const isSameFloorExploration = targetRoom.floor === currentRoom.floor && !targetRoom.isCompleted;
@@ -142,7 +150,15 @@ export function completeRoom(room: Room): void {
 }
 
 export type GameState =
-  'START' | 'MAP' | 'BATTLE' | 'REST' | 'TREASURE' | 'SHOP' | 'VICTORY' | 'GAME_OVER';
+  | 'START'
+  | 'SELECT_FIGHTER'
+  | 'MAP'
+  | 'BATTLE'
+  | 'REST'
+  | 'TREASURE'
+  | 'SHOP'
+  | 'VICTORY'
+  | 'GAME_OVER';
 
 export const INITIAL_GAME_STATE: GameState = 'START';
 
@@ -181,6 +197,7 @@ export interface EnemyIntent {
 export interface Enemy extends Combatant {
   type: BattleRoomType;
   intent: EnemyIntent;
+  enraged?: boolean;
 }
 
 export interface Card {
@@ -202,6 +219,7 @@ export interface BattleState {
   maxEnergy: number;
   turn: number;
   enemyDamage: number;
+  discardsRemaining: number;
 }
 
 export function isBattleRoom(type: RoomType): type is BattleRoomType {
@@ -282,8 +300,8 @@ export function createBattle(
 ): BattleState {
   const enemies: Record<BattleRoomType, { name: string; hp: number; damage: number }> = {
     CREEP: { name: 'Cultist', hp: 45, damage: 6 },
-    ELITE: { name: 'Gremlin Nob', hp: 85, damage: 10 },
-    BOSS: { name: 'The Guardian', hp: 240, damage: 14 },
+    ELITE: { name: 'Gremlin Nob', hp: 100, damage: 12 },
+    BOSS: { name: 'Sam the Dev', hp: 300, damage: 18 },
   };
   const enemy = enemies[type];
   const state: BattleState = {
@@ -294,6 +312,7 @@ export function createBattle(
       maxHp: enemy.hp,
       block: 0,
       type,
+      enraged: false,
       intent: calculateEnemyIntent(type, 1, enemy.damage),
     },
     deck: shuffle(
@@ -306,6 +325,7 @@ export function createBattle(
     maxEnergy: 3,
     turn: 1,
     enemyDamage: enemy.damage,
+    discardsRemaining: 3,
   };
   drawHand(state, random);
   return state;
@@ -349,6 +369,19 @@ function applyDamage(target: Combatant, damage: number): void {
   target.hp = Math.max(0, target.hp - Math.max(0, damage - absorbed));
 }
 
+function awakenBoss(state: BattleState): void {
+  if (
+    state.enemy.type !== 'BOSS' ||
+    state.enemy.enraged ||
+    state.enemy.hp <= 0 ||
+    state.enemy.hp > state.enemy.maxHp / 2
+  )
+    return;
+  state.enemy.enraged = true;
+  state.enemyDamage *= 2;
+  state.enemy.intent = calculateEnemyIntent(state.enemy.type, state.turn, state.enemyDamage);
+}
+
 export function playCard(state: BattleState, cardId: string): BattleState {
   if (!canPlayCard(state, cardId)) return state;
   const next = copyBattle(state);
@@ -356,8 +389,31 @@ export function playCard(state: BattleState, cardId: string): BattleState {
   const card = next.hand.splice(index, 1)[0]!;
   next.energy -= card.cost;
   applyDamage(next.enemy, card.damage ?? 0);
+  awakenBoss(next);
   next.player.block += card.block ?? 0;
   next.discard.push(card);
+  return next;
+}
+
+/** Cycle one card for free, preserving every instance and the input snapshot. */
+export function discardCard(
+  state: BattleState,
+  cardId: string,
+  random: () => number = Math.random,
+): BattleState {
+  const index = state.hand.findIndex((card) => card.id === cardId);
+  if (battleOutcome(state) !== 'ACTIVE' || state.discardsRemaining <= 0 || index < 0) return state;
+  const next = copyBattle(state);
+  const card = next.hand.splice(index, 1)[0]!;
+  // Draw before adding this card so it cannot immediately replace itself.
+  if (!next.deck.length && next.discard.length) {
+    next.deck = shuffle(next.discard, random);
+    next.discard = [];
+  }
+  const replacement = next.deck.pop();
+  if (replacement) next.hand.push(replacement);
+  next.discard.push(card);
+  next.discardsRemaining--;
   return next;
 }
 
@@ -384,6 +440,7 @@ export function endTurn(state: BattleState, random: () => number = Math.random):
   next.player.block = 0;
   next.energy = next.maxEnergy;
   next.turn++;
+  next.discardsRemaining = 3;
   next.enemy.intent = calculateEnemyIntent(next.enemy.type, next.turn, next.enemyDamage);
   drawHand(next, random);
   return next;

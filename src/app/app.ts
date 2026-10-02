@@ -24,6 +24,7 @@ import {
   createBattle,
   createPlayer,
   createStarterDeck,
+  discardCard,
   endTurn,
   generateMap,
   isBattleRoom,
@@ -60,11 +61,25 @@ interface DonutParticle {
   imports: [],
   templateUrl: './app.html',
   styleUrl: './app.css',
-  host: { '[class.battle-active]': "gameState === 'BATTLE'" },
+  host: {
+    '[class.battle-active]': "gameState === 'BATTLE'",
+    '[class.fire-theme]': "playerType === 'FIRE'",
+    '[class.water-theme]': "playerType === 'WATER'",
+  },
 })
 export class App implements AfterViewInit, OnDestroy {
   readonly sound = inject(SoundService);
   isPaused = false;
+  playerType: 'FIRE' | 'WATER' | null = null;
+  helpOpen = false;
+  discardMode = false;
+  draggingCardId: string | null = null;
+  @ViewChild('helpDialog') private helpDialog?: ElementRef<HTMLDialogElement>;
+  private helpOrigin?: HTMLElement;
+
+  get discardsRemaining(): number {
+    return this.battle?.discardsRemaining ?? 3;
+  }
   @ViewChild('settingsDialog') private settingsDialog?: ElementRef<HTMLDialogElement>;
   private settingsOrigin?: HTMLElement;
   private readonly cdr = inject(ChangeDetectorRef);
@@ -131,6 +146,7 @@ export class App implements AfterViewInit, OnDestroy {
 
   ngAfterViewInit(): void {
     if (!this.browser) return;
+    this.recalculateLines();
     this.zone.runOutsideAngular(() => {
       this.backgroundContext = this.backgroundCanvas?.nativeElement.getContext('2d') ?? null;
       if (!this.backgroundContext) return;
@@ -146,7 +162,7 @@ export class App implements AfterViewInit, OnDestroy {
   onViewportResize(): void {
     if (!this.browser) return;
     this.resizeBackground();
-    this.scheduleMeasurement();
+    this.recalculateLines();
   }
 
   private resizeBackground(): void {
@@ -181,7 +197,7 @@ export class App implements AfterViewInit, OnDestroy {
       if (this.backgroundFrame !== undefined) window.cancelAnimationFrame(this.backgroundFrame);
       this.backgroundFrame = undefined;
       this.backgroundTimestamp = undefined;
-      if (document.hidden || this.isPaused || this.reducedMotion?.matches) {
+      if (document.hidden || this.isPaused || this.helpOpen || this.reducedMotion?.matches) {
         if (!document.hidden) this.drawBackground(0);
       } else this.backgroundFrame = window.requestAnimationFrame(this.renderBackground);
     });
@@ -189,7 +205,14 @@ export class App implements AfterViewInit, OnDestroy {
 
   private readonly renderBackground = (timestamp: number): void => {
     this.backgroundFrame = undefined;
-    if (this.destroyed || document.hidden || this.isPaused || this.reducedMotion?.matches) return;
+    if (
+      this.destroyed ||
+      document.hidden ||
+      this.isPaused ||
+      this.helpOpen ||
+      this.reducedMotion?.matches
+    )
+      return;
     const elapsed =
       this.backgroundTimestamp === undefined
         ? 0
@@ -204,19 +227,32 @@ export class App implements AfterViewInit, OnDestroy {
     const ctx = this.backgroundContext;
     if (!ctx) return;
     ctx.clearRect(0, 0, this.backgroundWidth, this.backgroundHeight);
+    ctx.fillStyle =
+      this.playerType === 'FIRE' ? '#1a0808' : this.playerType === 'WATER' ? '#08121a' : '#0c121c';
+    ctx.fillRect(0, 0, this.backgroundWidth, this.backgroundHeight);
     for (const p of this.particles) {
-      p.x += p.vx * elapsed;
-      p.y += p.vy * elapsed;
+      p.x += (this.playerType === 'FIRE' ? 8 : this.playerType === 'WATER' ? 4 : p.vx) * elapsed;
+      p.y += (this.playerType === 'FIRE' ? -12 : this.playerType === 'WATER' ? -6 : p.vy) * elapsed;
       if (p.x < -16) p.x = this.backgroundWidth + 16;
       if (p.x > this.backgroundWidth + 16) p.x = -16;
       if (p.y > this.backgroundHeight + 16) p.y = -16;
       ctx.save();
-      ctx.translate(Math.round(p.x), Math.round(p.y));
-      ctx.rotate(this.globalAngle);
-      ctx.fillStyle = p.color;
+      ctx.translate(
+        Math.round(p.x + (this.playerType === 'WATER' ? Math.sin(this.globalAngle) * 4 : 0)),
+        Math.round(p.y),
+      );
+      ctx.fillStyle =
+        this.playerType === 'FIRE' ? '#bb4238' : this.playerType === 'WATER' ? '#278caa' : p.color;
       for (let row = -1; row <= 1; row++) {
         for (let column = -1; column <= 1; column++) {
-          if (row !== 0 || column !== 0)
+          const fire = this.playerType === 'FIRE';
+          if (
+            fire
+              ? row === -1
+                ? column === 0
+                : row === 0 || column === 0
+              : row !== 0 || column !== 0
+          )
             ctx.fillRect(column * p.pixel, row * p.pixel, p.pixel, p.pixel);
         }
       }
@@ -251,6 +287,14 @@ export class App implements AfterViewInit, OnDestroy {
       this.traversed.add(this.connectionId(this.currentRoom, room));
     } else if (room.nextRoomIds.includes(this.currentRoom.id)) {
       this.traversed.add(this.connectionId(room, this.currentRoom));
+    } else if (room.floor === this.currentRoom.floor + 1) {
+      const parent = this.allRooms.find(
+        (candidate) =>
+          candidate.floor === this.currentRoom.floor &&
+          candidate.isCompleted &&
+          candidate.nextRoomIds.includes(room.id),
+      );
+      if (parent) this.traversed.add(this.connectionId(parent, room));
     }
     this.currentRoom = room;
     visitRoom(room, this.allRooms);
@@ -258,6 +302,8 @@ export class App implements AfterViewInit, OnDestroy {
       const state = roomGameState(room.type);
       if (state === 'BATTLE' && isBattleRoom(room.type)) {
         this.battle = createBattle(room.type, this.player, this.playerDeck);
+        this.discardMode = false;
+        this.draggingCardId = null;
         this.battleMessage = 'Your turn. Play cards or end your turn.';
         this.gameState = 'BATTLE';
         this.sound.playMusic('BATTLE');
@@ -288,12 +334,67 @@ export class App implements AfterViewInit, OnDestroy {
     this.resolveBattle();
   }
 
+  canDiscard(card?: Card): boolean {
+    return (
+      !this.isPaused &&
+      this.gameState === 'BATTLE' &&
+      !!this.battle &&
+      battleOutcome(this.battle) === 'ACTIVE' &&
+      this.discardsRemaining > 0 &&
+      (card ? this.battle.hand.some((held) => held.id === card.id) : this.battle.hand.length > 0)
+    );
+  }
+
+  toggleDiscard(): void {
+    if (!this.canDiscard()) return;
+    this.discardMode = !this.discardMode;
+    this.sound.click();
+  }
+
+  activateCard(card: Card): void {
+    if (this.discardMode) this.discard(card);
+    else this.play(card);
+  }
+
+  discard(card: Card): void {
+    if (!this.battle || !this.canDiscard(card)) return;
+    this.battle = discardCard(this.battle, card.id);
+    this.battleMessage = `Discarded ${card.name}. ${this.discardsRemaining}/3 charges left.`;
+    if (!this.discardsRemaining) this.discardMode = false;
+    this.draggingCardId = null;
+    this.sound.card();
+    this.cdr.markForCheck();
+  }
+
+  startCardDrag(event: DragEvent, card: Card): void {
+    if (!this.canDiscard(card)) {
+      event.preventDefault();
+      return;
+    }
+    this.draggingCardId = card.id;
+    event.dataTransfer?.setData('text/plain', card.id);
+    if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+  }
+
+  allowDiscardDrop(event: DragEvent): void {
+    if (this.draggingCardId && this.canDiscard()) event.preventDefault();
+  }
+
+  dropCard(event: DragEvent): void {
+    event.preventDefault();
+    const card = this.battle?.hand.find((held) => held.id === this.draggingCardId);
+    if (card) this.discard(card);
+    this.draggingCardId = null;
+  }
+
   finishTurn(): void {
     if (this.isPaused || this.gameState !== 'BATTLE' || !this.battle) return;
     this.sound.click();
     const hp = this.battle.player.hp;
     const { name, intent } = this.battle.enemy;
     this.battle = endTurn(this.battle);
+    this.discardMode = false;
+    this.draggingCardId = null;
     if (intent.type === 'ATTACK') this.sound.hit();
     switch (intent.type) {
       case 'ATTACK':
@@ -374,12 +475,17 @@ export class App implements AfterViewInit, OnDestroy {
     this.gameState = 'MAP';
     this.sound.playMusic('MAP');
     this.cdr.markForCheck();
+    this.recalculateLines();
   }
 
   restart(): void {
     if (this.isPaused || (this.gameState !== 'GAME_OVER' && this.gameState !== 'VICTORY')) return;
     this.sound.click();
-    this.resetRun();
+    this.playerType = null;
+    this.gameState = 'SELECT_FIGHTER';
+    this.sound.stopMusic();
+    this.syncBackground();
+    this.cdr.markForCheck();
   }
 
   private resetRun(): void {
@@ -391,6 +497,27 @@ export class App implements AfterViewInit, OnDestroy {
     this.currentRoom = this.map[0][0];
     this.player = createPlayer();
     this.playerDeck = createStarterDeck();
+    this.player.name = this.playerType === 'FIRE' ? 'Ember Slayer' : 'Tide Guard';
+    this.playerDeck = this.playerDeck.map((card) => {
+      const damage =
+        card.damage === undefined ? undefined : card.damage + (this.playerType === 'FIRE' ? 3 : 0);
+      const block =
+        card.block === undefined ? undefined : card.block + (this.playerType === 'WATER' ? 4 : 0);
+      return {
+        ...card,
+        damage,
+        block,
+        name:
+          damage !== undefined
+            ? (this.playerType === 'FIRE' ? 'Ember ' : 'Tide ') + card.name
+            : this.playerType === 'WATER'
+              ? 'Tidal Guard'
+              : card.name,
+        description: damage !== undefined ? `Deal ${damage} damage.` : `Gain ${block} block.`,
+      };
+    });
+    this.discardMode = false;
+    this.draggingCardId = null;
     this.battle = null;
     this.gold = this.rewardGold = 0;
     this.bossDefeated = false;
@@ -409,11 +536,50 @@ export class App implements AfterViewInit, OnDestroy {
     void this.sound.unlock().then(() => {
       if (!this.destroyed) this.sound.click();
     });
+    this.playerType = null;
+    this.gameState = 'SELECT_FIGHTER';
+    this.syncBackground();
+    this.cdr.markForCheck();
+  }
+
+  selectFighter(type: 'FIRE' | 'WATER'): void {
+    if (this.isPaused || this.helpOpen || this.gameState !== 'SELECT_FIGHTER') return;
+    this.playerType = type;
+    this.sound.click();
     this.resetRun();
+    this.syncBackground();
+  }
+
+  openHelp(): void {
+    if (this.isPaused || this.helpOpen || this.gameState !== 'SELECT_FIGHTER') return;
+    if (this.browser && document.activeElement instanceof HTMLElement)
+      this.helpOrigin = document.activeElement;
+    this.helpOpen = true;
+    this.syncBackground();
+    this.cdr.detectChanges();
+    const dialog = this.helpDialog?.nativeElement;
+    if (dialog && !dialog.open) {
+      if (typeof dialog.showModal === 'function') dialog.showModal();
+      else dialog.setAttribute('open', '');
+    }
+    this.sound.click();
+  }
+
+  closeHelp(event?: Event): void {
+    event?.preventDefault();
+    const dialog = this.helpDialog?.nativeElement;
+    if (dialog?.open) {
+      if (typeof dialog.close === 'function') dialog.close();
+      else dialog.removeAttribute('open');
+    }
+    this.helpOpen = false;
+    this.syncBackground();
+    this.helpOrigin?.focus();
+    this.helpOrigin = undefined;
   }
 
   openSettings(): void {
-    if (this.isPaused) return;
+    if (this.isPaused || this.helpOpen) return;
     if (this.browser && document.activeElement instanceof HTMLElement) {
       this.settingsOrigin = document.activeElement;
     }
@@ -454,14 +620,18 @@ export class App implements AfterViewInit, OnDestroy {
   }
 
   returnToTitle(): void {
-    if (!this.isPaused) return;
+    if (!this.isPaused && this.gameState !== 'VICTORY') return;
     this.sound.stopMusic();
     clearTimeout(this.revealTimer);
     if (this.browser && this.frame !== undefined) window.cancelAnimationFrame(this.frame);
     this.frame = undefined;
     this.battle = null;
     this.gameState = 'START';
-    this.closeSettings();
+    this.playerType = null;
+    this.discardMode = false;
+    this.draggingCardId = null;
+    if (this.isPaused) this.closeSettings();
+    else this.syncBackground();
     this.sound.click();
     this.cdr.markForCheck();
   }
@@ -495,7 +665,13 @@ export class App implements AfterViewInit, OnDestroy {
   connectionState(connection: Connection): 'hidden' | 'available' | 'traversed' | 'revealed' {
     if (connection.from.isFog || connection.to.isFog) return 'hidden';
     if (this.traversed.has(connection.id)) return 'traversed';
-    if (connection.from.id === this.currentRoom.id && this.canSelectRoom(connection.to))
+    if (
+      (connection.from.id === this.currentRoom.id ||
+        (connection.from.floor === this.currentRoom.floor &&
+          connection.from.isCompleted &&
+          connection.to.floor === this.currentRoom.floor + 1)) &&
+      this.canSelectRoom(connection.to)
+    )
       return 'available';
     return 'revealed';
   }
@@ -508,8 +684,12 @@ export class App implements AfterViewInit, OnDestroy {
     connection.animate = false;
   }
 
+  recalculateLines(): void {
+    this.scheduleMeasurement();
+  }
+
   private readonly scheduleMeasurement = (): void => {
-    if (this.destroyed || !this.mapContainer || this.frame !== undefined) return;
+    if (!this.browser || this.destroyed || !this.mapContainer || this.frame !== undefined) return;
     this.frame = window.requestAnimationFrame(() => {
       this.frame = undefined;
       if (!this.mapContainer || this.destroyed) return;

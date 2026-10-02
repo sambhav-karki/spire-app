@@ -4,22 +4,60 @@
   class="settings-launcher action-btn"
   aria-label="Pause and sound settings"
   aria-haspopup="dialog"
-  [disabled]="isPaused"
+  [disabled]="isPaused || helpOpen"
   (click)="openSettings()"
 >
-  &#9881;
+  <span class="pixel-settings" aria-hidden="true"></span>
 </button>
-<main class="viewport-wrapper" [inert]="isPaused">
+<main class="viewport-wrapper" [inert]="isPaused || helpOpen">
   @if (gameState === 'START') {
     <section class="title-screen" aria-labelledby="title-logo">
       <div class="title-crest" aria-hidden="true">&#9876;</div>
       <h1 id="title-logo">WEBSLAYER <br />SPIRE</h1>
       <p class="press-start">PRESS START</p>
-      <button type="button" class="action-btn" (click)="startRun()">START RUN</button>
+      <button type="button" class="action-btn" (click)="startRun()">START GAME</button>
       <button type="button" class="action-btn" (click)="openSettings()">SETTINGS</button>
     </section>
   }
-  @if (gameState !== 'BATTLE' && gameState !== 'START') {
+  @if (gameState === 'SELECT_FIGHTER') {
+    <section class="fighter-screen" aria-labelledby="fighter-title">
+      <header class="fighter-header">
+        <h1 id="fighter-title">CHOOSE YOUR FIGHTER</h1>
+        <button
+          type="button"
+          class="action-btn help-button"
+          aria-label="Help with fighter elements"
+          aria-haspopup="dialog"
+          (click)="openHelp()"
+        >
+          ?
+        </button>
+      </header>
+      <div class="fighter-options">
+        <button type="button" class="fighter-card fire-fighter" (click)="selectFighter('FIRE')">
+          <span class="fighter-element">FIRE / OFFENSE</span>
+          <span class="fighter-portrait" aria-hidden="true"
+            ><span class="pixel-flame"></span><span>[FIRE SPRITE GIF]</span></span
+          >
+          <strong>EMBER SLAYER</strong>
+          <span>STRIKE 15 / GUARD 8</span>
+          <span>Fiery strikes. +3 attack damage.</span>
+          <span class="fighter-pick">SELECT FIRE</span>
+        </button>
+        <button type="button" class="fighter-card water-fighter" (click)="selectFighter('WATER')">
+          <span class="fighter-element">WATER / DEFENSE</span>
+          <span class="fighter-portrait" aria-hidden="true"
+            ><span class="pixel-droplet"></span><span>[WATER SPRITE GIF]</span></span
+          >
+          <strong>TIDE GUARD</strong>
+          <span>STRIKE 12 / GUARD 12</span>
+          <span>Sturdy shields. +4 guard block.</span>
+          <span class="fighter-pick">SELECT WATER</span>
+        </button>
+      </div>
+    </section>
+  }
+  @if (gameState !== 'BATTLE' && gameState !== 'START' && gameState !== 'SELECT_FIGHTER') {
     <h1 class="center-text">WebSlayer Spire</h1>
     <p class="center-text" aria-live="polite">
       Currently standing in: <strong>Room {{ currentRoom.id }} ({{ currentRoom.type }})</strong>
@@ -29,7 +67,7 @@
     <p class="center-text map-help">
       Choose a glowing room to continue. Explore your floor or return to cleared rooms.
     </p>
-    <div class="map-scroll">
+    <div class="map-space">
       <div #mapContainer class="map-container" aria-label="Dungeon map">
         <svg
           class="map-connections map-overlay"
@@ -83,7 +121,7 @@
     </div>
   }
 
-  @if (gameState !== 'BATTLE' && gameState !== 'START') {
+  @if (gameState !== 'BATTLE' && gameState !== 'START' && gameState !== 'SELECT_FIGHTER') {
     <p class="center-text run-status">
       HP {{ player.hp }} / {{ player.maxHp }} &middot; Gold {{ gold }}
     </p>
@@ -106,7 +144,7 @@
               aria-label="Hero pixel sprite placeholder"
             >
               <span class="pixel-silhouette hero-art" aria-hidden="true"></span>
-              <span class="sprite-caption">HERO</span>
+              <span class="sprite-caption">[PLAYER SPRITE]</span>
             </div>
             <div
               class="hp-track"
@@ -132,6 +170,9 @@
               aria-live="polite"
               [attr.data-intent]="combat.enemy.intent.type"
             >
+              @if (combat.enemy.enraged) {
+                <strong class="boss-phase">ENRAGED</strong>
+              }
               @switch (combat.enemy.intent.type) {
                 @case ('ATTACK') {
                   <span aria-hidden="true">&#9876;</span> ATTACK
@@ -154,11 +195,22 @@
               class="sprite-frame enemy-sprite"
               [class.elite-sprite]="combat.enemy.type === 'ELITE'"
               [class.boss-sprite]="combat.enemy.type === 'BOSS'"
+              [class.boss-enraged]="combat.enemy.enraged"
+              [class.red-aura]="combat.enemy.enraged && playerType === 'WATER'"
+              [class.blue-aura]="combat.enemy.enraged && playerType === 'FIRE'"
               role="img"
-              [attr.aria-label]="combat.enemy.name + ' pixel sprite placeholder'"
+              [attr.aria-label]="
+                combat.enemy.name +
+                (combat.enemy.enraged ? ', enraged, attacks doubled' : '') +
+                (combat.enemy.type === 'BOSS' ? ' avatar' : ' pixel sprite placeholder')
+              "
             >
-              <span class="pixel-silhouette enemy-art" aria-hidden="true"></span>
-              <span class="sprite-caption">{{ combat.enemy.type }}</span>
+              @if (combat.enemy.type === 'BOSS') {
+                <img class="boss-avatar enemy-art" src="avatar.gif" alt="" aria-hidden="true" />
+              } @else {
+                <span class="pixel-silhouette enemy-art" aria-hidden="true"></span>
+                <span class="sprite-caption">[ENEMY SPRITE]</span>
+              }
             </div>
             <div
               class="hp-track"
@@ -183,10 +235,20 @@
               type="button"
               [class.attack-card]="card.damage !== undefined"
               [class.defend-card]="card.block !== undefined"
-              [disabled]="!canPlay(card)"
-              (click)="play(card)"
+              [disabled]="discardMode ? !canDiscard(card) : !canPlay(card) && !canDiscard(card)"
+              [class.discard-choice]="discardMode"
+              [class.card-unaffordable]="!discardMode && !canPlay(card)"
+              [attr.draggable]="canDiscard(card)"
+              (dragstart)="startCardDrag($event, card)"
+              (dragend)="draggingCardId = null"
+              (click)="activateCard(card)"
               [attr.aria-label]="
-                card.name + ', costs ' + card.cost + ' energy. ' + card.description
+                (discardMode ? 'Discard ' : 'Play ') +
+                card.name +
+                ', costs ' +
+                card.cost +
+                ' energy. ' +
+                card.description
               "
             >
               <span class="card-top"
@@ -236,6 +298,20 @@
             <span>DRAW {{ combat.deck.length }}</span
             ><span>DISCARD {{ combat.discard.length }}</span>
           </div>
+          <button
+            type="button"
+            class="action-btn discard-button"
+            [class.discard-active]="discardMode"
+            [class.drop-ready]="draggingCardId"
+            [disabled]="!canDiscard()"
+            [attr.aria-pressed]="discardMode"
+            (click)="toggleDiscard()"
+            (dragover)="allowDiscardDrop($event)"
+            (drop)="dropCard($event)"
+          >
+            <span>{{ discardMode ? 'CANCEL' : 'DISCARD CARD' }}</span>
+            <span aria-live="polite">{{ discardsRemaining }}/3</span>
+          </button>
           <button type="button" class="action-btn end-turn" (click)="finishTurn()">
             END TURN &#9654;
           </button>
@@ -288,10 +364,19 @@
             {{ currentRoom.type === 'BOSS' ? 'Spire conquered!' : 'Battle won!' }}
           </h2>
           <p>{{ battle?.enemy?.name }} defeated. You earned {{ rewardGold }} gold.</p>
-          <button type="button" class="action-btn" (click)="returnToMap()">Return to map</button>
-          <button type="button" class="action-btn" (click)="restart()">Start a new run</button>
+          <div class="victory-actions">
+            <button type="button" class="action-btn continue-run" (click)="returnToMap()">
+              Continue
+            </button>
+            <button type="button" class="action-btn new-run" (click)="restart()">
+              Start New Run
+            </button>
+            <button type="button" class="action-btn exit-title" (click)="returnToTitle()">
+              Exit to Title
+            </button>
+          </div>
         } @else {
-          <h2 id="result-title">Game over</h2>
+          <h2 id="result-title">No match for the developer</h2>
           <p>
             The Spire claimed another challenger. Your run ended on floor {{ currentRoom.floor }}.
           </p>
@@ -301,9 +386,36 @@
     </section>
   }
   @if (gameState === 'MAP' && bossDefeated) {
-    <p class="center-text" role="status">The Guardian is defeated. The Spire is yours.</p>
+    <p class="center-text" role="status">Sam the Dev is defeated. The Spire is yours.</p>
   }
 </main>
+<dialog #helpDialog class="help-dialog" aria-labelledby="help-title" (cancel)="closeHelp($event)">
+  <section class="help-panel">
+    <button
+      type="button"
+      class="action-btn help-close"
+      aria-label="Close element help"
+      (click)="closeHelp()"
+    >
+      X
+    </button>
+    <h2 id="help-title">ELEMENT GUIDE</h2>
+    <p class="fire-text"><strong>FIRE / EMBER SLAYER</strong></p>
+    <p>
+      Aggressive offense: fiery strikes deal +3 damage. Break through enemy shields with powerful
+      attacks.
+    </p>
+    <p class="water-text"><strong>WATER / TIDE GUARD</strong></p>
+    <p>
+      Sturdy defense: guards grant +4 block. Sustain your HP by shielding against the displayed
+      enemy intent, then counterattack.
+    </p>
+    <p>
+      Both fighters can heal at rest sites. Discard up to 3 cards per turn to draw replacements
+      without spending energy.
+    </p>
+  </section>
+</dialog>
 <dialog
   #settingsDialog
   class="settings-dialog"

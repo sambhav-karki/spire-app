@@ -1,4 +1,4 @@
-﻿const fs = require('node:fs');
+const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
@@ -122,6 +122,21 @@ async function tap(selector) {
   await tap('.title-screen .action-btn');
   assert(
     await evaluate(
+      `ng.getComponent(document.querySelector('app-root')).gameState === 'SELECT_FIGHTER' && !document.querySelector('.map-container')`,
+    ),
+    'Start must require a fighter choice',
+  );
+  await tap('.help-button');
+  assert(
+    await evaluate(
+      `document.querySelector('.help-dialog').open && document.querySelector('.viewport-wrapper').inert`,
+    ),
+    'Help must trap focus and make selection inert',
+  );
+  await tap('.help-close');
+  await tap('.water-fighter');
+  assert(
+    await evaluate(
       `(() => { const app = ng.getComponent(document.querySelector('app-root')); return app.gameState === 'MAP' && app.sound.activeTrack === 'MAP' && app.sound.audioState === 'running' && app.sound.isMusicPlaying; })()`,
     ),
     'Start gesture must unlock synthesized music',
@@ -176,6 +191,43 @@ async function tap(selector) {
     });
     await evaluate(`(() => {
       const app = ng.getComponent(document.querySelector('app-root'));
+      app.gameState = 'SELECT_FIGHTER'; ng.applyChanges(app);
+    })()`);
+    assert(
+      await evaluate(`(() => {
+      const elements = [...document.querySelectorAll('.fighter-card, .fighter-header')];
+      return elements.every(element => { const r = element.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth; }) && document.scrollingElement.scrollHeight <= innerHeight && document.scrollingElement.scrollWidth <= innerWidth;
+    })()`),
+      width + 'x' + height + ': Fighter selection must fit',
+    );
+    await tap('.help-button');
+    assert(
+      await evaluate(`(() => {
+      const panel = document.querySelector('.help-panel'), r = panel.getBoundingClientRect();
+      return r.top >= 0 && r.bottom <= innerHeight && panel.scrollHeight <= panel.clientHeight && document.querySelector('.help-dialog').contains(document.activeElement);
+    })()`),
+      'Help must fit and contain focus',
+    );
+    await tap('.help-close');
+    const selectionShot = await command('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(
+      'artifacts/fighter-select-' + width + 'x' + height + '.png',
+      Buffer.from(selectionShot.data, 'base64'),
+    );
+    const fire = width === 390 || width === 844;
+    await tap(fire ? '.fire-fighter' : '.water-fighter');
+    assert(
+      await evaluate(`(() => {
+      const app = ng.getComponent(document.querySelector('app-root'));
+      const canvas = document.querySelector('#bg-canvas');
+      const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+      const colors = ${fire ? '[26, 8, 8]' : '[8, 18, 26]'};
+      return app.playerType === '${fire ? 'FIRE' : 'WATER'}' && pixels.some((value, index) => index % 4 === 0 && value === colors[0] && pixels[index + 1] === colors[1] && pixels[index + 2] === colors[2]);
+    })()`),
+      'Element selection must repaint the canvas palette',
+    );
+    await evaluate(`(() => {
+      const app = ng.getComponent(document.querySelector('app-root'));
       app.gameState = 'MAP'; app.currentRoom = app.map[0][0]; app.player.hp = 100;
       const room = app.map[1][0]; room.type = 'BOSS'; room.isFog = false; room.isCompleted = false;
       app.selectRoom(room); ng.applyChanges(app);
@@ -214,6 +266,10 @@ async function tap(selector) {
         `${width}x${height}: ${name} overlaps arena boundary: ${JSON.stringify(layout)}`,
       );
     assert(
+      layout.hero.right < layout.enemy.left,
+      'Player must stay left of enemy at every viewport',
+    );
+    assert(
       layout.cards.every(([w, h]) => w >= 44 && h >= 44),
       'Card tap target too small',
     );
@@ -222,6 +278,27 @@ async function tap(selector) {
     assert(
       layout.cards.every(([, , left, right]) => left >= -1 && right <= width + 1),
       'Cards overflow viewport',
+    );
+    await tap('.discard-button');
+    await tap('.card');
+    assert(
+      await evaluate(
+        `(() => { const app = ng.getComponent(document.querySelector('app-root')); return app.discardsRemaining === 2 && app.battle.energy === 3 && app.battle.hand.length === 5; })()`,
+      ),
+      'Click discard must draw a replacement for one charge',
+    );
+    await tap('.discard-button');
+    assert(
+      await evaluate(`(() => {
+      const app = ng.getComponent(document.querySelector('app-root'));
+      const card = document.querySelector('.card'), zone = document.querySelector('.discard-button');
+      const id = app.battle.hand[0].id;
+      card.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: new DataTransfer() }));
+      zone.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true }));
+      zone.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true }));
+      return app.discardsRemaining === 1 && app.battle.discard.some(card => card.id === id) && app.battle.hand.length === 5 && app.battle.energy === 3;
+    })()`),
+      'Drag drop must use the same guarded discard rules',
     );
     assert(
       await evaluate(`document.scrollingElement.scrollWidth <= innerWidth`),
@@ -249,6 +326,10 @@ async function tap(selector) {
     await evaluate(`document.querySelector('.end-turn').click()`);
     await delay(50);
     assert(
+      await evaluate(`ng.getComponent(document.querySelector('app-root')).discardsRemaining === 3`),
+      'New turn must restore all discard charges',
+    );
+    assert(
       await evaluate(
         `document.querySelector('.intent').textContent.includes('DEFEND') && document.querySelector('.intent').textContent.includes('12')`,
       ),
@@ -259,7 +340,7 @@ async function tap(selector) {
       const app = ng.getComponent(document.querySelector('app-root'));
       const before = JSON.stringify(app.battle);
       app.play(app.battle.hand[0]); app.finishTurn(); app.selectRoom(app.map[0][0]);
-      return { paused: app.isPaused, music: app.sound.isMusicPlaying, unchanged: before === JSON.stringify(app.battle), dialog: document.querySelector('dialog').open, focus: document.querySelector('dialog').contains(document.activeElement) };
+      return { paused: app.isPaused, music: app.sound.isMusicPlaying, unchanged: before === JSON.stringify(app.battle), dialog: document.querySelector('.settings-dialog').open, focus: document.querySelector('.settings-dialog').contains(document.activeElement) };
     })()`);
     assert(
       frozen.paused && !frozen.music && frozen.unchanged && frozen.dialog && frozen.focus,
@@ -316,12 +397,52 @@ async function tap(selector) {
       'Resume failed: ' +
         JSON.stringify(
           await evaluate(
-            `(() => { const app = ng.getComponent(document.querySelector('app-root')); return { paused: app.isPaused, gameState: app.gameState, music: app.sound.isMusicPlaying, dialogOpen: document.querySelector('dialog').open }; })()`,
+            `(() => { const app = ng.getComponent(document.querySelector('app-root')); return { paused: app.isPaused, gameState: app.gameState, music: app.sound.isMusicPlaying, dialogOpen: document.querySelector('.settings-dialog').open }; })()`,
           ),
         ),
     );
+    assert(
+      await evaluate(`(() => {
+      const app = ng.getComponent(document.querySelector('app-root'));
+      const art = document.querySelector('.enemy-art');
+      const before = art.getBoundingClientRect().width;
+      app.battle.enemy.hp = 151;
+      const card = { id: 'phase-check', name: 'Phase Check', cost: 0, damage: 1, description: '' };
+      app.battle.hand = [card]; app.play(card); ng.applyChanges(app);
+      const frame = document.querySelector('.enemy-sprite');
+      const arena = document.querySelector('.arena').getBoundingClientRect();
+      const enemy = document.querySelector('.enemy-stage').getBoundingClientRect();
+      const avatar = document.querySelector('.boss-avatar');
+      const avatarValid = avatar && avatar.complete && avatar.naturalWidth > 0 && getComputedStyle(avatar).animationName === 'boss-spin';
+      const aura = app.playerType === 'WATER' ? 'red-aura' : 'blue-aura';
+      return avatarValid && app.battle.enemy.name === 'Sam the Dev' && app.battle.enemy.enraged && app.battle.enemyDamage === 36 && frame.classList.contains(aura) && art.getBoundingClientRect().width > before && enemy.top >= arena.top - 1 && enemy.bottom <= arena.bottom + 1 && document.scrollingElement.scrollHeight <= innerHeight;
+    })()`),
+      'Enraged boss must grow, show the opposite aura, double attacks, and fit',
+    );
+    const phaseShot = await command('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(
+      'artifacts/enraged-boss-' + width + 'x' + height + '.png',
+      Buffer.from(phaseShot.data, 'base64'),
+    );
+    await evaluate(
+      `(() => { const app = ng.getComponent(document.querySelector('app-root')); app.gameState = 'VICTORY'; ng.applyChanges(app); })()`,
+    );
+    assert(
+      await evaluate(`(() => {
+      const panel = document.querySelector('.result-panel');
+      const buttons = [...document.querySelectorAll('.victory-actions button')];
+      const rects = buttons.map(button => button.getBoundingClientRect());
+      return buttons.map(button => button.textContent.trim()).join('|') === 'Continue|Start New Run|Exit to Title' && rects[0].bottom <= rects[1].top && rects[1].bottom <= rects[2].top && rects[1].width < rects[0].width && rects.every(r => r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth) && panel.scrollHeight <= panel.clientHeight;
+    })()`),
+      'Victory actions must stack and fit the viewport',
+    );
+    await tap('.continue-run');
+    assert(
+      await evaluate(`ng.getComponent(document.querySelector('app-root')).gameState === 'MAP'`),
+      'Continue must preserve the run and return to map',
+    );
     console.log(
-      `${width}x${height}: viewport, controls, tap targets passed; pixel font ${layout.loadedPixelFont ? 'loaded' : 'fallback'}`,
+      `${width}x${height}: viewport, victory actions, controls, tap targets passed; pixel font ${layout.loadedPixelFont ? 'loaded' : 'fallback'}`,
     );
     await evaluate(`(() => {
       const app = ng.getComponent(document.querySelector('app-root')); app.gameState = 'MAP'; app.battle = null;
@@ -332,9 +453,35 @@ async function tap(selector) {
     assert(
       await evaluate(`(() => {
       const map = document.querySelector('.map-container');
-      return map.scrollWidth <= map.clientWidth + 1 && document.scrollingElement.scrollWidth <= innerWidth && [...document.querySelectorAll('.room-btn')].every(button => { const r = button.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && r.width >= 44; });
+      const bounds = map.getBoundingClientRect();
+      const overlay = document.querySelector('.map-overlay').getBoundingClientRect();
+      return map.scrollWidth <= map.clientWidth + 1 && map.scrollHeight <= map.clientHeight + 1 && document.scrollingElement.scrollWidth <= innerWidth && document.scrollingElement.scrollHeight <= innerHeight && Math.abs(bounds.width - overlay.width) < 1 && Math.abs(bounds.height - overlay.height) < 1 && [...document.querySelectorAll('.room-btn')].every(button => { const r = button.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && r.top >= bounds.top && r.bottom <= bounds.bottom && r.bottom <= innerHeight && r.width >= 44; });
     })()`),
       'Three-room map does not fit viewport',
+    );
+    assert(
+      await evaluate(`(() => {
+      const app = ng.getComponent(document.querySelector('app-root'));
+      const map = document.querySelector('.map-container').getBoundingClientRect();
+      return app.connections.every(line => {
+        const center = room => { const r = document.querySelector('[data-room-id="' + room.id + '"]').getBoundingClientRect(); return [r.left - map.left + r.width / 2, r.top - map.top + r.height / 2]; };
+        const from = center(line.from), to = center(line.to);
+        return Math.abs(line.x1 - from[0]) < 1 && Math.abs(line.y1 - from[1]) < 1 && Math.abs(line.x2 - to[0]) < 1 && Math.abs(line.y2 - to[1]) < 1;
+      });
+    })()`),
+      'Map lines must stay anchored after resize and restoration',
+    );
+    await evaluate(
+      `(() => { const app = ng.getComponent(document.querySelector('app-root')); app.gameState = 'START'; ng.applyChanges(app); })()`,
+    );
+    assert(
+      await evaluate(`(() => {
+      return document.scrollingElement.scrollWidth <= innerWidth && document.scrollingElement.scrollHeight <= innerHeight && [...document.querySelectorAll('.title-screen > *')].every(element => { const r = element.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth; });
+    })()`),
+      'Title content must fit without scrolling',
+    );
+    console.log(
+      width + 'x' + height + ': all map floors, SVG anchors and title fit without scrolling',
     );
   }
   await evaluate(

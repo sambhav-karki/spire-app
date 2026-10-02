@@ -12,11 +12,12 @@
 html,
 body {
   margin: 0;
-  min-height: 100%;
+  height: 100dvh;
+  max-height: 100dvh;
   background: #0c121c;
   color: #f4ecd8;
   overscroll-behavior: none;
-  overflow-x: hidden;
+  overflow: hidden;
   max-width: 100%;
 }
 body,
@@ -129,6 +130,65 @@ canvas,
     10% 35%
   );
 }
+.boss-enraged {
+  --aura: #ef4035;
+  border-color: var(--aura);
+  outline-color: var(--aura);
+  box-shadow:
+    0 0 0 4px #111,
+    0 0 0 7px var(--aura);
+}
+.boss-enraged.blue-aura {
+  --aura: #319bff;
+}
+.boss-enraged.red-aura {
+  --aura: #ef4035;
+}
+.boss-enraged .enemy-art {
+  width: 90%;
+  height: 95%;
+  background: var(--aura);
+}
+.boss-phase {
+  color: #ffe082;
+  font-size: 7px;
+}
+.boss-avatar.enemy-art {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  clip-path: none;
+  background: transparent;
+  image-rendering: pixelated;
+}
+.boss-enraged .boss-avatar {
+  width: 115%;
+  height: 115%;
+  background: transparent;
+  filter: drop-shadow(3px 0 var(--aura)) drop-shadow(-3px 0 var(--aura))
+    drop-shadow(0 3px var(--aura)) drop-shadow(0 -3px var(--aura));
+  animation: boss-spin 1.8s steps(24) infinite;
+}
+app-root .battle-screen .arena .combatant .sprite-frame.boss-sprite {
+  width: clamp(64px, 22vw, 180px);
+  height: clamp(64px, 22vw, 180px);
+  border: 0;
+  outline: 0;
+  box-shadow: none;
+  background: transparent;
+}
+@media (max-height: 450px) {
+  app-root .battle-screen .arena .combatant .sprite-frame.boss-sprite {
+    width: 44px;
+    height: 44px;
+  }
+}
+@keyframes boss-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 .enemy-art::after {
   content: '';
   display: block;
@@ -194,6 +254,9 @@ canvas,
   text-align: center;
   font-size: 8px;
   transition: transform 0.15s;
+}
+.card-unaffordable {
+  opacity: 0.45;
 }
 .attack-card {
   border-color: #cb625e;
@@ -449,6 +512,28 @@ app-root .title-screen h1 {
   background: #080e17ed;
   padding: 12px;
 }
+.victory-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.victory-actions .action-btn {
+  margin: 0;
+  width: 190px;
+  padding: 6px;
+  font-size: 8px;
+}
+.victory-actions .continue-run {
+  width: 240px;
+  padding: 10px;
+  font-size: 11px;
+  background: var(--gold);
+  color: #111;
+}
+.victory-actions .exit-title {
+  background: #263545;
+}
 
 /* Shared pixel text colors and alignment. */
 .center-text {
@@ -500,4 +585,55 @@ app-root .card:not(:disabled):active {
   app-root .card:not(:disabled):hover {
     transform: translateY(-8px);
   }
+}
+
+/* Pixel fighter portraits and settings icon. */
+.pixel-flame,
+.pixel-droplet {
+  width: 44px;
+  height: 52px;
+  background: var(--fighter);
+  clip-path: polygon(
+    50% 0,
+    65% 30%,
+    80% 20%,
+    100% 70%,
+    80% 100%,
+    20% 100%,
+    0 70%,
+    25% 40%,
+    30% 65%
+  );
+}
+.pixel-droplet {
+  clip-path: polygon(
+    45% 0,
+    55% 0,
+    55% 20%,
+    70% 20%,
+    70% 40%,
+    85% 40%,
+    85% 80%,
+    70% 80%,
+    70% 100%,
+    30% 100%,
+    30% 80%,
+    15% 80%,
+    15% 40%,
+    30% 40%,
+    30% 20%,
+    45% 20%
+  );
+}
+.pixel-settings {
+  display: block;
+  width: 20px;
+  height: 20px;
+  margin: auto;
+  border: 6px solid #f4ecd8;
+  box-shadow:
+    0 -4px #f4ecd8,
+    0 4px #f4ecd8,
+    -4px 0 #f4ecd8,
+    4px 0 #f4ecd8;
 }
